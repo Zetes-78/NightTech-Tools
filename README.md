@@ -30,7 +30,7 @@ Download `NightTechRecovery-Setup.exe` from this repository's **Releases** page.
 
 ## Build
 
-**Automatic (GitHub):** every push to `main` runs the tests and builds the installer on GitHub's Windows machines (Actions tab, download the artifact). Pushing a tag like `v0.1.0` also publishes a Release with the installer and its SHA-256 file.
+**Automatic (GitHub):** every push to `main` runs the tests and builds the installer on GitHub's Windows machines (Actions tab, download the artifact). Publishing a Release (tag like `v0.1.0`) on GitHub builds the installer again and attaches it, with its SHA-256 file, to that Release.
 
 **On a Windows PC:**
 1. Install the .NET 8 SDK (`winget install Microsoft.DotNet.SDK.8`) and Inno Setup 6 (`winget install JRSoftware.InnoSetup`).
@@ -41,12 +41,13 @@ Open `NightTech.Tools.sln` in Visual Studio 2022 to work on the code.
 
 ## Releasing a new version
 
+On GitHub: Releases, Draft a new release, create a tag such as `v0.1.1`, Publish. Or from the command line:
+
 ```
-git tag v0.1.1
-git push origin v0.1.1
+gh release create v0.1.1 --title "Night Tech Recovery 0.1.1" --notes "What changed"
 ```
 
-The workflow builds, tests and attaches `NightTechRecovery-Setup.exe` to a new Release. The download link
+The workflow then builds, tests and attaches `NightTechRecovery-Setup.exe` to a new Release. The download link
 `https://github.com/<owner>/NightTech-Tools/releases/latest/download/NightTechRecovery-Setup.exe` always points to the newest version.
 
 Copyright (c) Night Tech Solutions. All rights reserved.

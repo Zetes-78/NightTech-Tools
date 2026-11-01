@@ -3,7 +3,8 @@ name: Build and test
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+  release:
+    types: [published]
   pull_request:
   workflow_dispatch:
 
@@ -48,7 +49,7 @@ jobs:
             installer/Output/NightTechRecovery-Setup.exe
             installer/Output/NightTechRecovery-Setup.exe.sha256.txt
 
-      - name: Publish release (tags only)
+      - name: Attach installer to the release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
