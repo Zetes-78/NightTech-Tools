@@ -1,0 +1,58 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart("v") }
+          else { $v = "0.1.0" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Test
+        run: dotnet test tests/NightTech.Core.Tests/NightTech.Core.Tests.csproj -c Release --logger "trx;LogFileName=results.trx"
+
+      - name: Build the app
+        run: dotnet build src/NightTech.Recovery/NightTech.Recovery.csproj -c Release
+
+      - name: Install Inno Setup
+        run: choco install innosetup --version 6.7.1 --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: ./build.ps1 -Version ${{ steps.ver.outputs.version }} -SkipTests
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NightTechRecovery-Setup-${{ steps.ver.outputs.version }}
+          path: |
+            installer/Output/NightTechRecovery-Setup.exe
+            installer/Output/NightTechRecovery-Setup.exe.sha256.txt
+
+      - name: Publish release (tags only)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Night Tech Recovery ${{ steps.ver.outputs.version }}
+          files: |
+            installer/Output/NightTechRecovery-Setup.exe
+            installer/Output/NightTechRecovery-Setup.exe.sha256.txt

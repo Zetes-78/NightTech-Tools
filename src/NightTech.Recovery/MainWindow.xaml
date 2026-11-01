@@ -1,0 +1,164 @@
+<Window x:Class="NightTech.Recovery.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Night Tech Recovery"
+        Width="1100" Height="820" MinWidth="900" MinHeight="660"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource Page}"
+        Icon="Assets/logo-icon.png"
+        Closing="Window_Closing">
+  <DockPanel>
+
+    <!-- Header -->
+    <Border DockPanel.Dock="Top" Background="{StaticResource Navy}" Padding="20,14">
+      <DockPanel>
+        <Border DockPanel.Dock="Left" Background="White" CornerRadius="8" Padding="4" Margin="0,0,14,0">
+          <Image Source="Assets/logo-icon.png" Width="40" Height="40" />
+        </Border>
+        <TextBlock DockPanel.Dock="Right" x:Name="VersionText" Foreground="#A9BFD9" VerticalAlignment="Center" />
+        <StackPanel VerticalAlignment="Center">
+          <TextBlock Text="Night Tech Recovery" Foreground="White" FontSize="20" FontWeight="SemiBold" />
+          <TextBlock Text="Drive imaging: a read-only copy of the customer's drive. All recovery work happens on the copy."
+                     Foreground="#DBE7F5" FontSize="13" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <!-- Footer log -->
+    <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="16,8">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top" Text="Activity" FontWeight="SemiBold" Foreground="{StaticResource Muted}" Margin="0,0,0,4" />
+        <ListBox x:Name="LogList" Height="110" BorderThickness="0" FontFamily="Consolas" FontSize="12" />
+      </DockPanel>
+    </Border>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <Grid Margin="20,16">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="3*" />
+          <ColumnDefinition Width="16" />
+          <ColumnDefinition Width="2*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Left column: steps -->
+        <StackPanel Grid.Column="0">
+
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <DockPanel>
+                <Button DockPanel.Dock="Right" x:Name="RefreshButton" Content="Refresh drives" Style="{StaticResource PlainButton}" Click="Refresh_Click" />
+                <TextBlock Text="1. Pick the customer's drive" Style="{StaticResource SectionTitle}" VerticalAlignment="Center" />
+              </DockPanel>
+              <ListBox x:Name="DiskList" Height="150" Margin="0,8,0,0" DisplayMemberPath="Display"
+                       SelectionChanged="DiskList_SelectionChanged" />
+              <TextBlock x:Name="DiskWarning" Foreground="{StaticResource Orange}" TextWrapping="Wrap" Margin="0,6,0,0" />
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}" BorderBrush="{StaticResource Orange}" Background="{StaticResource OrangeSoft}">
+            <StackPanel>
+              <TextBlock Text="2. Before you start" Style="{StaticResource SectionTitle}" />
+              <CheckBox x:Name="CheckHealthy">
+                <TextBlock TextWrapping="Wrap">
+                  The drive is <Bold>not</Bold> clicking, grinding, beeping, or dropping out. If it is, stop here and send it to a recovery lab: running it can destroy what's left.
+                </TextBlock>
+              </CheckBox>
+              <CheckBox x:Name="CheckWriteSafe">
+                <TextBlock TextWrapping="Wrap">
+                  I'm using a hardware write blocker, or Windows automount is off (<Run FontFamily="Consolas">mountvol /N</Run>), so Windows won't change the drive. This tool itself never writes to it.
+                </TextBlock>
+              </CheckBox>
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="130" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+              </Grid.RowDefinitions>
+              <TextBlock Grid.ColumnSpan="2" Text="3. Case details" Style="{StaticResource SectionTitle}" />
+
+              <TextBlock Grid.Row="1" Text="Hub ticket #" VerticalAlignment="Center" />
+              <TextBox Grid.Row="1" Grid.Column="1" x:Name="TicketBox" Margin="0,4" TextChanged="CaseInputs_Changed" />
+
+              <TextBlock Grid.Row="2" Text="Technician" VerticalAlignment="Center" />
+              <TextBox Grid.Row="2" Grid.Column="1" x:Name="TechBox" Margin="0,4" />
+
+              <TextBlock Grid.Row="3" Text="Case name" VerticalAlignment="Center" />
+              <TextBox Grid.Row="3" Grid.Column="1" x:Name="CaseBox" Margin="0,4" TextChanged="CaseBox_TextChanged" />
+
+              <TextBlock Grid.Row="4" Text="Save to folder" VerticalAlignment="Center" />
+              <DockPanel Grid.Row="4" Grid.Column="1" Margin="0,4">
+                <Button DockPanel.Dock="Right" Content="Browse..." Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="Browse_Click" />
+                <TextBox x:Name="FolderBox" TextChanged="CaseInputs_Changed" />
+              </DockPanel>
+
+              <TextBlock Grid.Row="5" Text="Notes" VerticalAlignment="Top" Margin="0,8,0,0" />
+              <TextBox Grid.Row="5" Grid.Column="1" x:Name="NotesBox" Margin="0,4" Height="54" TextWrapping="Wrap" AcceptsReturn="True"
+                       VerticalScrollBarVisibility="Auto" />
+            </Grid>
+          </Border>
+          <TextBlock x:Name="CaseHint" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="2,0,0,8" />
+        </StackPanel>
+
+        <!-- Right column: run -->
+        <StackPanel Grid.Column="2">
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <TextBlock Text="4. Make the image" Style="{StaticResource SectionTitle}" />
+              <Button x:Name="StartButton" Content="Start imaging" Style="{StaticResource PrimaryButton}" Click="Start_Click" />
+              <Button x:Name="StopButton" Content="Stop (progress is saved)" Style="{StaticResource PlainButton}" Margin="0,8,0,0"
+                      Click="Stop_Click" IsEnabled="False" />
+
+              <TextBlock x:Name="PhaseText" Text="Ready" FontWeight="SemiBold" Margin="0,16,0,6" />
+              <ProgressBar x:Name="Bar" Height="18" Minimum="0" Maximum="100" Foreground="{StaticResource Orange}" />
+              <TextBlock x:Name="PercentText" HorizontalAlignment="Right" Foreground="{StaticResource Muted}" Margin="0,4,0,8" />
+
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                  <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="Copied" Foreground="{StaticResource Muted}" Margin="0,2,16,2" />
+                <TextBlock Grid.Row="0" Grid.Column="1" x:Name="GoodText" Text="-" />
+                <TextBlock Grid.Row="1" Text="Unreadable" Foreground="{StaticResource Muted}" Margin="0,2,16,2" />
+                <TextBlock Grid.Row="1" Grid.Column="1" x:Name="BadText" Text="-" />
+                <TextBlock Grid.Row="2" Text="Remaining" Foreground="{StaticResource Muted}" Margin="0,2,16,2" />
+                <TextBlock Grid.Row="2" Grid.Column="1" x:Name="PendingText" Text="-" />
+                <TextBlock Grid.Row="3" Text="Speed" Foreground="{StaticResource Muted}" Margin="0,2,16,2" />
+                <TextBlock Grid.Row="3" Grid.Column="1" x:Name="SpeedText" Text="-" />
+                <TextBlock Grid.Row="4" Text="Time left" Foreground="{StaticResource Muted}" Margin="0,2,16,2" />
+                <TextBlock Grid.Row="4" Grid.Column="1" x:Name="EtaText" Text="-" />
+              </Grid>
+
+              <Button x:Name="OpenFolderButton" Content="Open case folder" Style="{StaticResource PlainButton}" Margin="0,16,0,0"
+                      Click="OpenFolder_Click" IsEnabled="False" />
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <TextBlock Text="How it works" Style="{StaticResource SectionTitle}" />
+              <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}">
+                Pass 1 copies fast and skips past damaged spots. Pass 2 goes back sector by sector. Pass 3 retries the sectors that failed.
+                Unreadable sectors are zero-filled and listed in the report. Stop any time and start the same case again to resume.
+              </TextBlock>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Grid>
+    </ScrollViewer>
+  </DockPanel>
+</Window>
