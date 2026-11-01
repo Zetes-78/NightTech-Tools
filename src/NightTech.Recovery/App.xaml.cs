@@ -6,7 +6,10 @@ namespace NightTech.Recovery;
 
 public partial class App : Application
 {
-    public static AppLog Log { get; } = new("Recovery");
+    /// <summary>Run from the Night Tech USB kit (a "portable.txt" next to the program): logs stay on the stick.</summary>
+    public static bool Portable { get; } = File.Exists(Path.Combine(AppContext.BaseDirectory, "portable.txt"));
+
+    public static AppLog Log { get; } = new("Recovery", Portable ? Path.Combine(AppContext.BaseDirectory, "Logs") : null);
 
     public static string ToolVersion { get; } =
         typeof(App).Assembly.GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "0.0.0";

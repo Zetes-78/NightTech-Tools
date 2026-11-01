@@ -11,7 +11,7 @@
     <AssemblyName>NightTechRecovery</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\NightTechRecovery.ico</ApplicationIcon>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Company>Night Tech Solutions</Company>
     <Product>Night Tech Recovery</Product>

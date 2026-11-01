@@ -54,14 +54,23 @@ foreach ($t in $tools) {
     Write-Hash "installer\Output\$($t.Setup)"
 }
 
-# USB kit: Field Kit (portable mode) plus Recovery, ready to copy to a stick.
+# USB kit: Field Kit plus Recovery in portable mode, ready to copy to a stick.
+# The USB copy of Recovery keeps its native files beside the exe too, so neither tool unpacks anything
+# into the customer's temp folder, and portable.txt keeps both tools' logs and reports on the stick.
 Write-Host "== USB kit ==" -ForegroundColor Cyan
+$recoveryVersion = if ($Version) { $Version } else { Get-ProjectVersion $tools[0].Project }
+dotnet publish $tools[0].Project -c Release -r win-x64 --self-contained true `
+    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=false -p:DebugType=None -p:Version=$recoveryVersion `
+    -o publish\recovery-usb
+if ($LASTEXITCODE -ne 0) { throw "Publishing the USB copy of Night Tech Recovery failed." }
 $kit = "publish\usb\Night Tech Field Kit"
 New-Item -ItemType Directory -Force "$kit\Field Kit", "$kit\Recovery" | Out-Null
 Copy-Item -Recurse publish\fieldkit\* "$kit\Field Kit"
-Copy-Item -Recurse publish\recovery\* "$kit\Recovery"
-"This file tells Night Tech Field Kit to keep reports and logs on this USB stick. Don't delete it." |
-    Out-File -Encoding ascii "$kit\Field Kit\portable.txt"
+Copy-Item -Recurse publish\recovery-usb\* "$kit\Recovery"
+foreach ($dir in "$kit\Field Kit", "$kit\Recovery") {
+    "This file tells Night Tech tools to keep their logs and reports on this USB stick. Don't delete it." |
+        Out-File -Encoding ascii "$dir\portable.txt"
+}
 Copy-Item packaging\USB-README.txt "$kit\README.txt"
 $zip = "installer\Output\NightTechFieldKit-USB.zip"
 if (Test-Path $zip) { Remove-Item $zip }

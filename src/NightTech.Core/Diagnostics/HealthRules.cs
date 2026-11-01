@@ -9,7 +9,7 @@ namespace NightTech.Core.Diagnostics;
 public static class HealthRules
 {
     public const int SsdWearWarn = 70, SsdWearProblem = 90;
-    public const int DiskTempWarnC = 60;
+    public const int SsdTempWarnC = 70, HddTempWarnC = 55, OtherTempWarnC = 60;
     public const int BatteryWarnPercent = 70, BatteryProblemPercent = 50;
     public const double LowSpaceWarnPercent = 10, LowSpaceProblemPercent = 5;
     public const long LowSpaceWarnBytes = 10L * 1024 * 1024 * 1024;
@@ -67,7 +67,9 @@ public static class HealthRules
                         $"The SSD reports {wear}% of its rated life used."));
             }
 
-            if (d.TemperatureC is { } t && t >= DiskTempWarnC)
+            var tempLimit = d.MediaType == "SSD" || d.BusType == "NVMe" ? SsdTempWarnC
+                : d.MediaType == "HDD" ? HddTempWarnC : OtherTempWarnC;
+            if (d.TemperatureC is { } t && t >= tempLimit)
                 f.Add(new Finding(Severity.Warning, "Drives", $"{name} is running hot",
                     $"{t} °C. Check airflow and fans; heat shortens drive life."));
         }
@@ -86,9 +88,13 @@ public static class HealthRules
                 f.Add(new Finding(Severity.Warning, "Storage", $"{label} is low on space",
                     $"{free} free ({v.FreePercent:0}%)."));
 
-            if (v.IsSystem && v.BitLocker.Equals("On", StringComparison.OrdinalIgnoreCase))
+            if (v.IsSystem && v.IsEncrypted)
                 f.Add(new Finding(Severity.Info, "Security", $"BitLocker is on for {v.Name}",
+                    (v.BitLocker.StartsWith("Encrypted", StringComparison.OrdinalIgnoreCase) ? "The drive is encrypted; protection is suspended for now. " : "") +
                     "Get the BitLocker recovery key (usually in the customer's Microsoft account) before any drive, BIOS or motherboard work."));
+            else if (v.IsSystem && string.IsNullOrEmpty(v.BitLocker) && !r.RanAsAdministrator)
+                f.Add(new Finding(Severity.Info, "Security", "BitLocker wasn't checked",
+                    "Run as administrator to check it. Many newer computers encrypt the drive automatically, so confirm before any drive, BIOS or motherboard work."));
         }
     }
 
@@ -97,10 +103,10 @@ public static class HealthRules
         if (r.Computer.RamBytes is not { } ram) return;
         var gb = ram / (1024.0 * 1024 * 1024);
         if (gb < 3.5)
-            f.Add(new Finding(Severity.Warning, "Memory", $"Only {Format.Bytes(ram)} of memory",
+            f.Add(new Finding(Severity.Warning, "Memory", $"Only {Format.Bytes(ram)} of memory installed",
                 "Windows 10 and 11 run slowly with less than 4 GB. A memory upgrade would help if the computer supports it."));
         else if (gb < 7.5)
-            f.Add(new Finding(Severity.Info, "Memory", $"{Format.Bytes(ram)} of memory",
+            f.Add(new Finding(Severity.Info, "Memory", $"{Format.Bytes(ram)} of memory installed",
                 "Fine for light use. 8 GB or more helps with many browser tabs and newer programs."));
     }
 
@@ -122,9 +128,13 @@ public static class HealthRules
     private static void Events(DiagnosticReport r, List<Finding> f)
     {
         var e = r.Events;
+        var drives = e.DiskEventDrives.Count > 0 ? " (" + string.Join(", ", e.DiskEventDrives) + ")" : "";
         if (e.DiskErrors is > 0)
-            f.Add(new Finding(Severity.Problem, "Drives", "Windows logged disk errors",
-                $"{e.DiskErrors} disk error(s) in the last {e.Days} days. This often means a failing drive or cable. Back up first."));
+            f.Add(new Finding(Severity.Problem, "Drives", "Windows found bad blocks on a drive",
+                $"{e.DiskErrors} bad block error(s) in the last {e.Days} days{drives}. This usually means the drive is failing. Back up first."));
+        else if (e.DiskWarnings is > 0)
+            f.Add(new Finding(Severity.Warning, "Drives", "Windows had to retry reading a drive",
+                $"{e.DiskWarnings} retried or failed read(s) in the last {e.Days} days{drives}. Can be an early sign of a failing drive or a loose cable."));
         if (e.BlueScreens is > 0)
             f.Add(new Finding(Severity.Warning, "Stability", "Blue screen crashes",
                 $"{e.BlueScreens} crash(es) in the last {e.Days} days."));
@@ -149,7 +159,8 @@ public static class HealthRules
     private static void Windows(DiagnosticReport r, List<Finding> f, DateTime now)
     {
         var c = r.Computer;
-        if (c.OsName.Contains("Windows 10", StringComparison.OrdinalIgnoreCase) && now >= Windows10EndOfSupport)
+        var ltsc = c.OsName.Contains("LTSC", StringComparison.OrdinalIgnoreCase) || c.OsName.Contains("LTSB", StringComparison.OrdinalIgnoreCase);
+        if (c.OsName.Contains("Windows 10", StringComparison.OrdinalIgnoreCase) && !ltsc && now >= Windows10EndOfSupport)
             f.Add(new Finding(Severity.Warning, "Windows", "Windows 10 no longer gets regular security updates",
                 "Microsoft ended Windows 10 support on October 14, 2025, unless the PC is enrolled in Extended Security Updates. " +
                 "Check whether it can upgrade to Windows 11."));
@@ -159,18 +170,26 @@ public static class HealthRules
                 $"The newest installed update is from {upd.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}."));
 
         if (c.LastBoot is { } boot && (now - boot).TotalDays > UptimeInfoDays)
-            f.Add(new Finding(Severity.Info, "Windows", "Not restarted in a while",
-                $"Running for {(int)(now - boot).TotalDays} days. A restart finishes updates and clears slowdowns."));
+            f.Add(new Finding(Severity.Info, "Windows", "No full restart in a while",
+                $"The last full restart was {(int)(now - boot).TotalDays} days ago. \"Shut down\" doesn't count while Fast Startup is on. " +
+                "Using Restart finishes updates and clears slowdowns."));
     }
 
     private static void Network(DiagnosticReport r, List<Finding> f)
     {
         var n = r.Network;
-        if (n.InternetReachable == false)
+        var hasRouter = n.Adapters.Any(a => a.Gateways.Count > 0);
+        if (n.InternetReachable == false && !hasRouter)
+            f.Add(new Finding(Severity.Problem, "Network", "Not connected to a network",
+                "No router was found. Check the Wi-Fi connection or network cable."));
+        else if (n.InternetReachable == false && n.DnsWorks == true)
+            f.Add(new Finding(Severity.Warning, "Network", "Internet tests were blocked",
+                "Website names look up, but the internet tests didn't get through. A firewall or filter on this network may be blocking them. Check by opening a website."));
+        else if (n.InternetReachable == false)
             f.Add(new Finding(Severity.Problem, "Network", "No internet connection",
                 n.GatewayReachable == true
                     ? "The router answers, but the internet doesn't. The problem is likely the modem or internet provider."
-                    : "The router didn't answer either. Check the Wi-Fi or cable connection."));
+                    : "The router didn't answer either. Check the Wi-Fi or cable connection, and restart the router."));
         else if (n.DnsWorks == false)
             f.Add(new Finding(Severity.Warning, "Network", "Website names don't look up",
                 "The internet answers, but name lookups (DNS) failed. Check the DNS settings or the router."));

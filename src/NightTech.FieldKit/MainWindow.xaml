@@ -20,7 +20,7 @@
         </StackPanel>
         <StackPanel VerticalAlignment="Center">
           <TextBlock Text="Night Tech Field Kit" Foreground="White" FontSize="20" FontWeight="SemiBold" />
-          <TextBlock Text="Check a computer's health in a few minutes and leave the customer a clear report. Read only: nothing on the computer is changed."
+          <TextBlock Text="Check a computer's health in a few minutes and leave the customer a clear report. The checks are read only: they change nothing."
                      Foreground="#DBE7F5" FontSize="13" TextWrapping="Wrap" />
         </StackPanel>
       </DockPanel>
@@ -121,7 +121,7 @@
           <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
             <StackPanel>
               <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,0,0,12"
-                         Text="Shortcuts to Windows' own repair and inspection tools, plus Night Tech tools. Ones marked (admin) ask for administrator rights." />
+                         Text="Shortcuts to Windows' own inspection and repair tools, plus Night Tech tools. Ones marked (admin) ask for administrator rights. Ones marked CHANGES WINDOWS ask you to confirm first." />
               <WrapPanel x:Name="ToolsPanel" />
             </StackPanel>
           </ScrollViewer>

@@ -170,7 +170,7 @@ public partial class MainWindow : Window
         if (recovery is not null)
             Add("Night Tech Recovery", "Image a drive before recovery work (admin)", () => Launch(recovery));
 
-        Add("Battery report", "Windows' full battery history, saved with the reports", BatteryReport);
+        Add("Battery report", "Windows' full battery history, saved with the reports", () => _ = BatteryReportAsync());
         Add("Device Manager", "Missing drivers and failed devices", () => Launch("devmgmt.msc"));
         Add("Disk Management", "Partitions, drive letters, unallocated space", () => Launch("diskmgmt.msc"));
         Add("Event Viewer", "Windows' detailed logs", () => Launch("eventvwr.msc"));
@@ -185,9 +185,17 @@ public partial class MainWindow : Window
         Add("Network connections", "Adapters, Wi-Fi and IP settings", () => Launch("ncpa.cpl"));
         Add("Check the Windows drive", "Read-only scan for file system errors (admin)",
             () => AdminCommand("chkdsk " + (Path.GetPathRoot(Environment.SystemDirectory) ?? "C:\\").TrimEnd('\\')));
-        Add("Repair system files", "sfc /scannow (admin)", () => AdminCommand("sfc /scannow"));
-        Add("Repair Windows image", "DISM restore health; needs internet (admin)", () => AdminCommand("DISM /Online /Cleanup-Image /RestoreHealth"));
-        Add("Memory test", "Restarts the computer to test memory", MemoryTest);
+        Add("Repair system files", "sfc /scannow. CHANGES WINDOWS: replaces damaged system files (admin)", () =>
+        {
+            if (Confirm("Repair system files", "System File Checker replaces damaged Windows system files. It takes 10 to 30 minutes."))
+                AdminCommand("sfc /scannow");
+        });
+        Add("Repair Windows image", "DISM restore health. CHANGES WINDOWS; needs internet (admin)", () =>
+        {
+            if (Confirm("Repair Windows image", "DISM downloads and replaces damaged Windows component files. It needs internet and can take 15 to 45 minutes."))
+                AdminCommand("DISM /Online /Cleanup-Image /RestoreHealth");
+        });
+        Add("Memory test", "CHANGES WINDOWS: restarts the computer to test memory (admin)", MemoryTest);
         Add("Command prompt (admin)", "For anything else", () => Launch("cmd.exe", "", admin: true));
     }
 
@@ -203,40 +211,54 @@ public partial class MainWindow : Window
     /// <summary>Opens an administrator command prompt that runs the command and stays open to show the result.</summary>
     private static void AdminCommand(string command) => Launch("cmd.exe", "/k " + command, admin: true);
 
-    private void BatteryReport()
+    private static bool Confirm(string title, string text) =>
+        MessageBox.Show(text + "\n\nGet the customer's OK and save any open work first. Continue?", title,
+            MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+
+    private async Task BatteryReportAsync()
     {
-        Directory.CreateDirectory(KitPaths.Reports);
-        var name = Format.SafeFileName($"{(string.IsNullOrWhiteSpace(TicketBox.Text) ? "" : TicketBox.Text.Trim() + "-")}{Environment.MachineName}-battery-{DateTime.Now:yyyyMMdd-HHmm}");
-        var output = Path.Combine(KitPaths.Reports, name + ".html");
-        var psi = new ProcessStartInfo("powercfg.exe")
+        try
         {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        psi.ArgumentList.Add("/batteryreport");
-        psi.ArgumentList.Add("/output");
-        psi.ArgumentList.Add(output);
-        using var p = Process.Start(psi);
-        p?.WaitForExit(30000);
-        if (File.Exists(output))
-        {
-            App.Log.Info("Battery report saved: " + output);
-            Open(output);
+            Directory.CreateDirectory(KitPaths.Reports);
+            var ticket = string.IsNullOrWhiteSpace(TicketBox.Text) ? "" : TicketBox.Text.Trim() + "-";
+            var name = Format.SafeFileName($"{ticket}{Environment.MachineName}-battery-{DateTime.Now:yyyyMMdd-HHmmss}");
+            var output = Path.Combine(KitPaths.Reports, name + ".html");
+            var psi = new ProcessStartInfo("powercfg.exe") { UseShellExecute = false, CreateNoWindow = true };
+            psi.ArgumentList.Add("/batteryreport");
+            psi.ArgumentList.Add("/output");
+            psi.ArgumentList.Add(output);
+            StatusText.Text = "Making the battery report...";
+            using (var p = Process.Start(psi))
+            {
+                if (p is not null)
+                {
+                    using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                    try { await p.WaitForExitAsync(limit.Token); } catch (OperationCanceledException) { }
+                }
+            }
+            if (File.Exists(output))
+            {
+                StatusText.Text = "Battery report saved with the reports.";
+                App.Log.Info("Battery report saved: " + output);
+                Open(output);
+            }
+            else
+            {
+                StatusText.Text = "";
+                MessageBox.Show("Windows didn't create a battery report. This computer may not have a battery.",
+                    "Night Tech Field Kit", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            MessageBox.Show("Windows didn't create a battery report. This computer may not have a battery.",
-                "Night Tech Field Kit", MessageBoxButton.OK, MessageBoxImage.Information);
+            App.Log.Error("The battery report failed.", ex);
         }
     }
 
     private void MemoryTest()
     {
-        var answer = MessageBox.Show(
-            "The Windows Memory Diagnostic asks to restart the computer and tests memory before Windows starts.\n\n" +
-            "Save any open work first. Continue?",
-            "Memory test", MessageBoxButton.YesNo, MessageBoxImage.Question);
-        if (answer == MessageBoxResult.Yes) Launch("mdsched.exe", "", admin: true);
+        if (Confirm("Memory test", "The Windows Memory Diagnostic restarts the computer and tests memory before Windows starts. It takes 10 to 20 minutes."))
+            Launch("mdsched.exe", "", admin: true);
     }
 }
 

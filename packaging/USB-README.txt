@@ -14,8 +14,12 @@ ON A CUSTOMER'S COMPUTER
 4. Click "Open customer report" to show or print the results.
 5. Back at the shop, attach the .txt report to the ticket in Night Tech Hub (Files and photos).
 
-Reports and logs are saved on the stick, in Field Kit\Reports and Field Kit\Logs, never on the customer's computer.
-The file "portable.txt" next to the program is what tells it to do that. Don't delete it.
+Field Kit's reports and logs are saved on the stick (Field Kit\Reports and Field Kit\Logs), and Recovery's logs in
+Recovery\Logs, not on the customer's computer. The "portable.txt" file next to each program is what tells it to do
+that. Don't delete it. (Recovery's drive images go wherever you choose: use a shop drive with enough space.)
+
+Field Kit's checks are read only. In its Tools tab, the buttons marked CHANGES WINDOWS (system file repair, DISM,
+memory test) do change the computer, so they ask first: get the customer's OK.
 
 For drive temperature, SSD wear and BitLocker status, click "Restart as administrator".
 If a drive clicks, grinds or isn't detected, stop: it goes to a recovery lab.

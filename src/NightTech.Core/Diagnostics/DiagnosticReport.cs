@@ -63,6 +63,8 @@ public sealed class MemoryModule
 
 public sealed class DiskRecord
 {
+    /// <summary>Windows disk number (the N in \\.\PhysicalDriveN), when known.</summary>
+    public int? Number { get; set; }
     public string Name { get; set; } = "";
     public string Serial { get; set; } = "";
     public long? SizeBytes { get; set; }
@@ -89,8 +91,12 @@ public sealed class VolumeRecord
     public long SizeBytes { get; set; }
     public long FreeBytes { get; set; }
     public bool IsSystem { get; set; }
-    /// <summary>On, Off, or empty when unknown (needs administrator rights).</summary>
+    /// <summary>"On", "Encrypted, protection suspended", "Off", or empty when not checked (needs administrator rights).</summary>
     public string BitLocker { get; set; } = "";
+
+    [JsonIgnore]
+    public bool IsEncrypted => BitLocker.StartsWith("On", StringComparison.OrdinalIgnoreCase) ||
+                               BitLocker.StartsWith("Encrypted", StringComparison.OrdinalIgnoreCase);
 
     [JsonIgnore]
     public double FreePercent => SizeBytes > 0 ? FreeBytes * 100.0 / SizeBytes : 0;
@@ -155,8 +161,12 @@ public sealed class EventSummary
     public int? UnexpectedShutdowns { get; set; }
     /// <summary>Blue screens (BugCheck 1001).</summary>
     public int? BlueScreens { get; set; }
-    /// <summary>Disk errors reported by Windows (disk 7, 51, 153).</summary>
+    /// <summary>Bad blocks Windows found on the computer's own drives (disk event 7). USB drives are left out.</summary>
     public int? DiskErrors { get; set; }
+    /// <summary>Paging errors and retried reads on the computer's own drives (disk events 51 and 153). USB drives are left out.</summary>
+    public int? DiskWarnings { get; set; }
+    /// <summary>Names of the drives the disk events were about.</summary>
+    public List<string> DiskEventDrives { get; set; } = new();
 }
 
 public sealed class StartupItem

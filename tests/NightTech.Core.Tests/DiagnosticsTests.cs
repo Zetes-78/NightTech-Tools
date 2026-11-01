@@ -56,7 +56,7 @@ public class DiagnosticsTests
         var f = Eval(r);
         Assert.Equal(Severity.Problem, f[0].Severity);
         Assert.Contains("failing", f[0].Title);
-        Assert.Contains(f, x => x.Severity == Severity.Info && x.Title == "Not restarted in a while");
+        Assert.Contains(f, x => x.Severity == Severity.Info && x.Title == "No full restart in a while" && x.Detail.Contains("Fast Startup"));
     }
 
     [Theory]
@@ -79,7 +79,7 @@ public class DiagnosticsTests
         r.Events.DiskErrors = 2;
         var f = Eval(r);
         Assert.Contains(f, x => x.Severity == Severity.Problem && x.Title.Contains("read errors"));
-        Assert.Contains(f, x => x.Severity == Severity.Problem && x.Title == "Windows logged disk errors");
+        Assert.Contains(f, x => x.Severity == Severity.Problem && x.Title == "Windows found bad blocks on a drive");
     }
 
     [Fact]
@@ -128,10 +128,86 @@ public class DiagnosticsTests
     public void No_internet_but_router_answers_points_at_the_provider()
     {
         var r = Healthy();
+        r.Network.Adapters.Add(new NetAdapter { Name = "Wi-Fi", Gateways = { "192.168.1.1" } });
         r.Network.InternetReachable = false;
+        r.Network.DnsWorks = false;
         var f = Eval(r).Single(x => x.Area == "Network");
         Assert.Equal(Severity.Problem, f.Severity);
         Assert.Contains("internet provider", f.Detail);
+    }
+
+    [Fact]
+    public void Disk_retries_alone_are_a_warning_and_name_the_drive()
+    {
+        var r = Healthy();
+        r.Events.DiskWarnings = 3;
+        r.Events.DiskEventDrives = new() { "Samsung SSD 980" };
+        var f = Eval(r).Single(x => x.Area == "Drives");
+        Assert.Equal(Severity.Warning, f.Severity);
+        Assert.Contains("Samsung SSD 980", f.Detail);
+    }
+
+    [Theory]
+    [InlineData("SSD", "NVMe", 65, false)]
+    [InlineData("SSD", "NVMe", 72, true)]
+    [InlineData("HDD", "SATA", 56, true)]
+    [InlineData("HDD", "SATA", 50, false)]
+    public void Drive_heat_limit_depends_on_the_kind_of_drive(string media, string bus, int temp, bool hot)
+    {
+        var r = Healthy();
+        r.Disks[0].MediaType = media;
+        r.Disks[0].BusType = bus;
+        r.Disks[0].TemperatureC = temp;
+        Assert.Equal(hot, Eval(r).Any(x => x.Title.EndsWith("is running hot")));
+    }
+
+    [Fact]
+    public void Windows_10_ltsc_is_still_supported()
+    {
+        var r = Healthy();
+        r.Computer.OsName = "Microsoft Windows 10 Enterprise LTSC";
+        Assert.DoesNotContain(Eval(r), x => x.Title.StartsWith("Windows 10 no longer"));
+    }
+
+    [Fact]
+    public void No_router_means_not_connected()
+    {
+        var r = Healthy();
+        r.Network = new NetworkRecord { InternetReachable = false, DnsWorks = false };
+        Assert.Contains(Eval(r), x => x.Severity == Severity.Problem && x.Title == "Not connected to a network");
+    }
+
+    [Fact]
+    public void Blocked_tests_with_working_dns_are_only_a_warning()
+    {
+        var r = Healthy();
+        r.Network.Adapters.Add(new NetAdapter { Name = "Ethernet", Gateways = { "10.0.0.1" } });
+        r.Network.InternetReachable = false;
+        r.Network.DnsWorks = true;
+        var f = Eval(r).Single(x => x.Area == "Network");
+        Assert.Equal(Severity.Warning, f.Severity);
+        Assert.Equal("Internet tests were blocked", f.Title);
+    }
+
+    [Fact]
+    public void Bitlocker_suspended_still_reminds_about_the_key()
+    {
+        var r = Healthy();
+        r.RanAsAdministrator = true;
+        r.Volumes[0].BitLocker = "Encrypted, protection suspended";
+        var f = Eval(r).Single(x => x.Title.StartsWith("BitLocker is on"));
+        Assert.Contains("suspended", f.Detail);
+    }
+
+    [Fact]
+    public void Bitlocker_not_checked_without_admin_says_so()
+    {
+        var r = Healthy();
+        r.RanAsAdministrator = false;
+        Assert.Contains(Eval(r), x => x.Title == "BitLocker wasn't checked");
+        r.RanAsAdministrator = true;
+        r.Volumes[0].BitLocker = "Off";
+        Assert.DoesNotContain(Eval(r), x => x.Title.StartsWith("BitLocker"));
     }
 
     [Fact]
@@ -165,7 +241,7 @@ public class DiagnosticsTests
         try
         {
             var files = ReportWriter.Save(r, dir);
-            Assert.EndsWith("NT-0012-DESKTOP-ABC123-20261101-1830.html", files.Html);
+            Assert.EndsWith("NT-0012-DESKTOP-ABC123-20261101-183000.html", files.Html);
             Assert.True(File.Exists(files.Text));
             var json = File.ReadAllText(files.Json);
             Assert.Contains("\"tool\": \"Night Tech Field Kit\"", json);

@@ -2,9 +2,11 @@ using System.Diagnostics.Eventing.Reader;
 using System.Globalization;
 using System.Management;
 using System.Net;
+using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Principal;
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 using NightTech.Core.Diagnostics;
 
@@ -43,14 +45,23 @@ public static class Collector
         Step(r, progress, "programs that start with Windows", () => Startup(r));
         Step(r, progress, "installed programs", () => Programs(r));
         if (!r.RanAsAdministrator)
-            r.Notes.Add("Run as administrator to also check drive temperature and wear, and BitLocker.");
+            r.Notes.Add("Drive temperature, wear and error counts, and BitLocker, need administrator rights (Restart as administrator).");
         progress.Report("Checks finished.");
     }
+
+    private static readonly TimeSpan StepTimeLimit = TimeSpan.FromSeconds(90);
 
     private static void Step(DiagnosticReport r, IProgress<string> progress, string label, Action check)
     {
         progress.Report($"Checking {label}...");
-        try { check(); }
+        try
+        {
+            // A failing drive or a damaged Windows can make a check hang. Give up on it and move on.
+            var task = Task.Run(check);
+            if (!task.Wait(StepTimeLimit))
+                r.Notes.Add($"Checking {label} took too long and was skipped.");
+        }
+        catch (AggregateException ex) { r.Notes.Add($"Couldn't check {label}: {ex.InnerException?.Message ?? ex.Message}"); }
         catch (Exception ex) { r.Notes.Add($"Couldn't check {label}: {ex.Message}"); }
     }
 
@@ -138,6 +149,9 @@ public static class Collector
                 PartNumber = Str(o, "PartNumber"),
             });
         }
+        // Installed memory, not what's left after built-in graphics takes its share.
+        var installed = r.Computer.Memory.Sum(m => m.CapacityBytes);
+        if (installed > 0) r.Computer.RamBytes = installed;
     }
 
     private static void Updates(DiagnosticReport r)
@@ -157,14 +171,17 @@ public static class Collector
 
     private static void Disks(DiagnosticReport r)
     {
-        var byId = new Dictionary<string, DiskRecord>();
         try
         {
-            foreach (var o in Query(@"root\Microsoft\Windows\Storage",
-                         "SELECT DeviceId, FriendlyName, SerialNumber, MediaType, BusType, HealthStatus, OperationalStatus, Size FROM MSFT_PhysicalDisk"))
+            using var searcher = new ManagementObjectSearcher(@"root\Microsoft\Windows\Storage", "SELECT * FROM MSFT_PhysicalDisk");
+            searcher.Options.Timeout = TimeSpan.FromSeconds(30);
+            using var results = searcher.Get();
+            string? counterError = null;
+            foreach (ManagementObject o in results)
             {
                 var d = new DiskRecord
                 {
+                    Number = int.TryParse(Str(o, "DeviceId"), out var num) ? num : null,
                     Name = Str(o, "FriendlyName"),
                     Serial = Str(o, "SerialNumber"),
                     SizeBytes = Long(o, "Size"),
@@ -174,17 +191,36 @@ public static class Collector
                     OperationalStatus = OperationalText(Get(o, "OperationalStatus")),
                 };
                 r.Disks.Add(d);
-                byId[Str(o, "DeviceId")] = d;
+
+                // Temperature, wear and error counts: Windows only gives these per disk, and only to administrators.
+                if (!r.RanAsAdministrator) continue;
+                try
+                {
+                    using var counters = o.GetRelated("MSFT_StorageReliabilityCounter");
+                    foreach (ManagementBaseObject c in counters)
+                    {
+                        d.TemperatureC = Int(c, "Temperature") is > 0 and var t ? t : null;
+                        if (d.MediaType == "SSD") d.WearPercent = Int(c, "Wear");
+                        d.PowerOnHours = Long(c, "PowerOnHours") is > 0 and var h ? h : null;
+                        d.ReadErrorsUncorrected = Long(c, "ReadErrorsUncorrected");
+                        d.ReadErrorsTotal = Long(c, "ReadErrorsTotal");
+                        break;
+                    }
+                }
+                catch (Exception ex) { counterError ??= ex.Message; }
             }
+            if (counterError is not null)
+                r.Notes.Add("Couldn't read temperature and wear for every drive: " + counterError);
         }
         catch (ManagementException)
         {
             // Older Windows without the Storage namespace: fall back to the basic drive list.
-            foreach (var o in Query(@"root\CIMV2", "SELECT Model, SerialNumber, Size, Status, InterfaceType FROM Win32_DiskDrive"))
+            foreach (var o in Query(@"root\CIMV2", "SELECT Index, Model, SerialNumber, Size, Status, InterfaceType FROM Win32_DiskDrive"))
             {
                 var status = Str(o, "Status");
                 r.Disks.Add(new DiskRecord
                 {
+                    Number = Int(o, "Index"),
                     Name = Str(o, "Model"),
                     Serial = Str(o, "SerialNumber"),
                     SizeBytes = Long(o, "Size"),
@@ -194,26 +230,6 @@ public static class Collector
                     OperationalStatus = status,
                 });
             }
-            return;
-        }
-
-        if (!r.RanAsAdministrator || byId.Count == 0) return;
-        try
-        {
-            foreach (var o in Query(@"root\Microsoft\Windows\Storage",
-                         "SELECT DeviceId, Temperature, Wear, PowerOnHours, ReadErrorsUncorrected, ReadErrorsTotal FROM MSFT_StorageReliabilityCounter"))
-            {
-                if (!byId.TryGetValue(Str(o, "DeviceId"), out var d)) continue;
-                d.TemperatureC = Int(o, "Temperature") is > 0 and var t ? t : null;
-                if (d.MediaType == "SSD") d.WearPercent = Int(o, "Wear");
-                d.PowerOnHours = Long(o, "PowerOnHours") is > 0 and var h ? h : null;
-                d.ReadErrorsUncorrected = Long(o, "ReadErrorsUncorrected");
-                d.ReadErrorsTotal = Long(o, "ReadErrorsTotal");
-            }
-        }
-        catch (Exception ex)
-        {
-            r.Notes.Add("Couldn't read drive temperature and wear: " + ex.Message);
         }
     }
 
@@ -254,18 +270,37 @@ public static class Collector
         if (!r.RanAsAdministrator) return;
         try
         {
-            foreach (var o in Query(@"root\CIMV2\Security\MicrosoftVolumeEncryption",
-                         "SELECT DriveLetter, ProtectionStatus FROM Win32_EncryptableVolume"))
+            using var searcher = new ManagementObjectSearcher(@"root\CIMV2\Security\MicrosoftVolumeEncryption", "SELECT * FROM Win32_EncryptableVolume");
+            searcher.Options.Timeout = TimeSpan.FromSeconds(30);
+            using var results = searcher.Get();
+            foreach (ManagementObject o in results)
             {
                 var letter = Str(o, "DriveLetter");
-                var v = r.Volumes.FirstOrDefault(x => x.Name.StartsWith(letter, StringComparison.OrdinalIgnoreCase) && letter.Length > 0);
+                if (letter.Length == 0) continue;
+                var v = r.Volumes.FirstOrDefault(x => x.Name.StartsWith(letter, StringComparison.OrdinalIgnoreCase));
                 if (v is null) continue;
-                v.BitLocker = Int(o, "ProtectionStatus") switch { 1 => "On", 0 => "Off", _ => "" };
+                if (Int(o, "ProtectionStatus") == 1) { v.BitLocker = "On"; continue; }
+
+                // Protection off can still mean an encrypted drive with protection suspended
+                // (common during updates, and on Windows Home "device encryption" before sign-in).
+                int? conversion = null;
+                try
+                {
+                    using var outParams = o.InvokeMethod("GetConversionStatus", null, null);
+                    conversion = outParams is null ? null : Int(outParams, "ConversionStatus");
+                }
+                catch { /* older Windows: leave it unknown */ }
+                v.BitLocker = conversion switch
+                {
+                    0 => "Off",
+                    null => "Off (encryption state unknown)",
+                    _ => "Encrypted, protection suspended",
+                };
             }
         }
         catch (ManagementException)
         {
-            // BitLocker isn't available on this edition of Windows (for example Home): nothing to report.
+            // This Windows doesn't offer BitLocker information: nothing to report.
         }
     }
 
@@ -282,10 +317,11 @@ public static class Collector
         r.Battery = b;
         try
         {
-            b.DesignCapacityMWh = Query(@"root\WMI", "SELECT DesignedCapacity FROM BatteryStaticData")
-                .Select(o => Long(o, "DesignedCapacity")).FirstOrDefault(v => v > 0);
-            b.FullChargeCapacityMWh = Query(@"root\WMI", "SELECT FullChargedCapacity FROM BatteryFullChargedCapacity")
-                .Select(o => Long(o, "FullChargedCapacity")).FirstOrDefault(v => v > 0);
+            // Some laptops have two batteries: add them up so design and current capacity match.
+            var design = Query(@"root\WMI", "SELECT DesignedCapacity FROM BatteryStaticData").Sum(o => Long(o, "DesignedCapacity") ?? 0);
+            var full = Query(@"root\WMI", "SELECT FullChargedCapacity FROM BatteryFullChargedCapacity").Sum(o => Long(o, "FullChargedCapacity") ?? 0);
+            b.DesignCapacityMWh = design > 0 ? design : null;
+            b.FullChargeCapacityMWh = full > 0 ? full : null;
             b.CycleCount = Query(@"root\WMI", "SELECT CycleCount FROM BatteryCycleCount")
                 .Select(o => Int(o, "CycleCount")).FirstOrDefault(v => v > 0);
         }
@@ -304,27 +340,46 @@ public static class Collector
         }
     }
 
+    private static readonly Regex DiskNumber = new(@"Harddisk(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private static void Events(DiagnosticReport r)
     {
         var ms = (long)TimeSpan.FromDays(r.Events.Days).TotalMilliseconds;
         string Q(string provider, string ids) =>
             $"*[System[Provider[@Name='{provider}'] and ({ids}) and TimeCreated[timediff(@SystemTime) <= {ms}]]]";
 
-        r.Events.UnexpectedShutdowns = Count(Q("Microsoft-Windows-Kernel-Power", "EventID=41"));
-        r.Events.BlueScreens = Count(Q("Microsoft-Windows-WER-SystemErrorReporting", "EventID=1001"));
-        r.Events.DiskErrors = Count(Q("disk", "EventID=7 or EventID=51 or EventID=153"));
+        r.Events.UnexpectedShutdowns = Count(Q("Microsoft-Windows-Kernel-Power", "EventID=41"), _ => true);
+        r.Events.BlueScreens = Count(Q("Microsoft-Windows-WER-SystemErrorReporting", "EventID=1001"), _ => true);
+
+        // Disk events also fire for USB sticks and card readers (including this kit's own stick when it's pulled out),
+        // so only count the ones about the computer's own drives.
+        var drives = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool Internal(EventRecord e)
+        {
+            var text = string.Join(" ", e.Properties.Select(p => p.Value?.ToString() ?? ""));
+            var m = DiskNumber.Match(text);
+            if (!m.Success) return true; // can't tell which drive: count it
+            var disk = r.Disks.FirstOrDefault(d => d.Number == int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture));
+            if (disk is null) return true;
+            if (disk.BusType is "USB" or "SD" or "MMC") return false;
+            drives.Add(string.IsNullOrWhiteSpace(disk.Name) ? "disk " + disk.Number : disk.Name);
+            return true;
+        }
+        r.Events.DiskErrors = Count(Q("disk", "EventID=7"), Internal);
+        r.Events.DiskWarnings = Count(Q("disk", "EventID=51 or EventID=153"), Internal);
+        r.Events.DiskEventDrives = drives.ToList();
     }
 
-    private static int Count(string xpath)
+    private static int Count(string xpath, Func<EventRecord, bool> include)
     {
         var query = new EventLogQuery("System", PathType.LogName, xpath);
         using var reader = new EventLogReader(query);
         var n = 0;
-        while (n < 10000)
+        for (var seen = 0; seen < 10000; seen++)
         {
             using var e = reader.ReadEvent();
             if (e is null) break;
-            n++;
+            if (include(e)) n++;
         }
         return n;
     }
@@ -357,7 +412,8 @@ public static class Collector
         n.GatewayReachable = gateway is null ? null : PingHost(gateway, out _);
 
         long ms = 0;
-        n.InternetReachable = PingHost("1.1.1.1", out ms) || PingHost("8.8.8.8", out ms) || TcpOpen("1.1.1.1", 443) || TcpOpen("8.8.8.8", 443);
+        n.InternetReachable = PingHost("1.1.1.1", out ms) || PingHost("8.8.8.8", out ms) ||
+                              WebCheck() || TcpOpen("1.1.1.1", 443) || TcpOpen("8.8.8.8", 443);
         n.InternetPingMs = n.InternetReachable == true && ms > 0 ? ms : null;
 
         try
@@ -384,6 +440,18 @@ public static class Collector
         return false;
     }
 
+    /// <summary>Windows' own internet check page; works on networks that block ping.</summary>
+    private static bool WebCheck()
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(6) };
+            var text = http.GetStringAsync("http://www.msftconnecttest.com/connecttest.txt").GetAwaiter().GetResult();
+            return text.Contains("Microsoft Connect Test", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
     private static bool TcpOpen(string host, int port)
     {
         try
@@ -403,7 +471,8 @@ public static class Collector
     {
         ReadRun(r, RegistryHive.CurrentUser, RegistryView.Default, RunKey, "Run (this user)", RegistryHive.CurrentUser, "Run");
         ReadRun(r, RegistryHive.LocalMachine, RegistryView.Registry64, RunKey, "Run (all users)", RegistryHive.LocalMachine, "Run");
-        ReadRun(r, RegistryHive.LocalMachine, RegistryView.Registry32, RunKey, "Run (all users, 32-bit)", RegistryHive.LocalMachine, "Run32");
+        if (Environment.Is64BitOperatingSystem)
+            ReadRun(r, RegistryHive.LocalMachine, RegistryView.Registry32, RunKey, "Run (all users, 32-bit)", RegistryHive.LocalMachine, "Run32");
         ReadFolder(r, Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Startup folder (this user)", RegistryHive.CurrentUser);
         ReadFolder(r, Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "Startup folder (all users)", RegistryHive.LocalMachine);
     }

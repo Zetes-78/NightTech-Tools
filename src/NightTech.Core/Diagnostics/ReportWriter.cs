@@ -24,13 +24,13 @@ public static class ReportWriter
 
     public sealed record SavedFiles(string Html, string Text, string Json);
 
-    /// <summary>"NT-0012-DESKTOP-ABC-20261101-1830" (the ticket part is left out when there is none).</summary>
+    /// <summary>"NT-0012-DESKTOP-ABC-20261101-183005" (the ticket part is left out when there is none).</summary>
     public static string BaseName(DiagnosticReport r)
     {
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(r.Ticket)) parts.Add(r.Ticket);
         parts.Add(string.IsNullOrWhiteSpace(r.Computer.Name) ? "computer" : r.Computer.Name);
-        parts.Add(r.Started.ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture));
+        parts.Add(r.Started.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
         return Format.SafeFileName(string.Join("-", parts), 120);
     }
 
@@ -134,7 +134,9 @@ public static class ReportWriter
         Line($"WINDOWS EVENTS (last {r.Events.Days} days)");
         Row("Unexpected shutdowns", r.Events.UnexpectedShutdowns?.ToString(CultureInfo.InvariantCulture) ?? "not checked");
         Row("Blue screens", r.Events.BlueScreens?.ToString(CultureInfo.InvariantCulture) ?? "not checked");
-        Row("Disk errors", r.Events.DiskErrors?.ToString(CultureInfo.InvariantCulture) ?? "not checked");
+        Row("Bad blocks", r.Events.DiskErrors?.ToString(CultureInfo.InvariantCulture) ?? "not checked");
+        Row("Retried reads", r.Events.DiskWarnings?.ToString(CultureInfo.InvariantCulture) ?? "not checked");
+        if (r.Events.DiskEventDrives.Count > 0) Row("Drives involved", string.Join(", ", r.Events.DiskEventDrives));
         Line();
 
         Line($"STARTS WITH WINDOWS ({r.Startup.Count})");
