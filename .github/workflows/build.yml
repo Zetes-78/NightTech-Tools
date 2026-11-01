@@ -21,39 +21,27 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Version
-        id: ver
-        shell: pwsh
-        run: |
-          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart("v") }
-          else { $v = "0.1.0" }
-          "version=$v" >> $env:GITHUB_OUTPUT
-
       - name: Test
         run: dotnet test tests/NightTech.Core.Tests/NightTech.Core.Tests.csproj -c Release --logger "trx;LogFileName=results.trx"
 
-      - name: Build the app
-        run: dotnet build src/NightTech.Recovery/NightTech.Recovery.csproj -c Release
+      - name: Build every tool
+        run: dotnet build NightTech.Tools.sln -c Release
 
       - name: Install Inno Setup
         run: choco install innosetup --version 6.7.1 --no-progress -y
 
-      - name: Build installer
+      # Each tool's version comes from its .csproj, so one release can carry tools at different versions.
+      - name: Build installers and USB kit
         shell: pwsh
-        run: ./build.ps1 -Version ${{ steps.ver.outputs.version }} -SkipTests
+        run: ./build.ps1 -SkipTests
 
       - uses: actions/upload-artifact@v4
         with:
-          name: NightTechRecovery-Setup-${{ steps.ver.outputs.version }}
-          path: |
-            installer/Output/NightTechRecovery-Setup.exe
-            installer/Output/NightTechRecovery-Setup.exe.sha256.txt
+          name: NightTech-Tools-installers
+          path: installer/Output/*
 
-      - name: Attach installer to the release
+      - name: Attach installers to the release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          name: Night Tech Recovery ${{ steps.ver.outputs.version }}
-          files: |
-            installer/Output/NightTechRecovery-Setup.exe
-            installer/Output/NightTechRecovery-Setup.exe.sha256.txt
+          files: installer/Output/*

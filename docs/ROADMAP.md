@@ -7,7 +7,7 @@ shop's office software and lives in its own repository.
 ## Phase 1: what the shop needs now
 - [x] **Shared foundation** (`NightTech.Core`): branding, logging, reports
 - [x] **Night Tech Recovery, step 1: drive imager** (read only, 3 passes, resume, SHA-256, reports)
-- [ ] **Night Tech Hub upgrades**: intake photos, condition notes, on-screen signature, status-text templates, quote builder with Square link (6% SC tax), attach Recovery reports to tickets
+- [x] **Night Tech Hub upgrades** (Hub 1.1): intake photos, condition notes, on-screen signature, status-text templates, quote builder with Square link (6% SC tax), attach Recovery reports to tickets
 - [ ] **Night Tech Wipe**: HDD overwrite with verification; SSD/NVMe built-in secure erase; results sent to the Hub's wipe certificate
 
 ## Phase 2: next 1 to 3 months
@@ -15,7 +15,8 @@ shop's office software and lives in its own repository.
 - [ ] **Recovery step 3: undelete and partition recovery** (NTFS, FAT32, exFAT; lost partitions)
 - [ ] **Recovery step 4**: thumbnails, sorting, customer report, case tracking tied to the Hub ticket
 - [ ] **Burn-in tester**: CPU, memory, drive health and battery, with a printed pass/fail sheet
-- [ ] **Night Tech Field Kit v1**: USB toolkit with diagnostics and launchers for Recovery, Wipe and Burn-in
+- [x] **Night Tech Field Kit v1**: USB health check, customer report, Windows tool launchers, Recovery launcher
+- [ ] **Field Kit v2**: launchers for Wipe and Burn-in; send reports straight to the Hub ticket
 
 ## Phase 3: business clients and monthly income
 - [ ] **Network documenter**
