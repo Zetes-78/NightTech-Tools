@@ -27,3 +27,11 @@ If a drive clicks, grinds or isn't detected, stop: it goes to a recovery lab.
 
 Windows SmartScreen may warn the first time because the programs aren't code-signed yet:
 click "More info", then "Run anyway".
+
+CLEANUP (the $50 PC cleanup)
+Open "Cleanup\NightTechCleanup.exe" (it asks for administrator rights). "Run quick cleanup" does the standard job:
+restore point, before measurements, junk, startup suggestions, Defender update and quick scan, Windows component cleanup
+and drive optimization. Then review the Programs and Security tabs with the customer, and save the report on Finish.
+
+MAC CLEANUP
+On a Mac, open the "Mac Cleanup" folder and double-click "Start Mac Cleanup.command" (see its README.txt).

@@ -5,7 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using NightTech.Cleanup.Windows;
 using NightTech.Core.Cleanup;
-using NightTech.Core.Diagnostics;
+using Format = NightTech.Core.Diagnostics.Format;
 
 namespace NightTech.Cleanup;
 

@@ -71,8 +71,18 @@ Copy-Item -Recurse publish\fieldkit\* "$kit\Field Kit"
 Copy-Item -Recurse publish\recovery-usb\* "$kit\Recovery"
 Copy-Item -Recurse publish\wipe\* "$kit\Wipe"
 Copy-Item -Recurse publish\cleanup\* "$kit\Cleanup"
-# The Mac cleanup is built on a Mac by the workflow and dropped into publish\mac-cleanup when present.
-if (Test-Path publish\mac-cleanup) { New-Item -ItemType Directory -Force "$kit\Mac Cleanup" | Out-Null; Copy-Item -Recurse publish\mac-cleanup\* "$kit\Mac Cleanup" }
+# The Mac cleanup is built on a Mac by the workflow (mac-build\). When it's here, it goes in the kit and gets its own zip.
+if (Test-Path mac-build) {
+    New-Item -ItemType Directory -Force "$kit\Mac Cleanup" | Out-Null
+    Copy-Item -Recurse mac-build\* "$kit\Mac Cleanup"
+    "This file tells Night Tech tools to keep their logs and reports on this USB stick. Don't delete it." | Out-File -Encoding ascii "$kit\Mac Cleanup\arm64\portable.txt"
+    "This file tells Night Tech tools to keep their logs and reports on this USB stick. Don't delete it." | Out-File -Encoding ascii "$kit\Mac Cleanup\x64\portable.txt"
+    # The download zip is the one made on the Mac (it keeps the programs' permissions).
+    if (Test-Path mac-zip\NightTechMacCleanup.zip) {
+        Copy-Item mac-zip\NightTechMacCleanup.zip installer\Output\NightTechMacCleanup.zip -Force
+        Write-Hash installer\Output\NightTechMacCleanup.zip
+    }
+}
 foreach ($dir in "$kit\Field Kit", "$kit\Recovery", "$kit\Wipe", "$kit\Cleanup") {
     "This file tells Night Tech tools to keep their logs and reports on this USB stick. Don't delete it." |
         Out-File -Encoding ascii "$dir\portable.txt"

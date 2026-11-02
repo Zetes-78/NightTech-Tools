@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>NightTech.MacCleanup</RootNamespace>
+    <AssemblyName>NightTechMacCleanup</AssemblyName>
+    <Version>0.1.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Company>Night Tech Solutions</Company>
+    <Product>Night Tech Mac Cleanup</Product>
+    <Copyright>Copyright (c) Night Tech Solutions</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NightTech.Core\NightTech.Core.csproj" />
+  </ItemGroup>
+
+</Project>

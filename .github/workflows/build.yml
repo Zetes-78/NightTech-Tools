@@ -12,10 +12,55 @@ permissions:
   contents: write
 
 jobs:
+  # The Mac cleanup is built on a Mac, so it's properly signed (ad hoc) to run on Apple-chip Macs.
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build Mac Cleanup (Apple chip and Intel)
+        run: |
+          for rid in osx-arm64 osx-x64; do
+            dotnet publish src/NightTech.MacCleanup/NightTech.MacCleanup.csproj -c Release -r $rid --self-contained true \
+              -p:PublishSingleFile=true -p:DebugType=None -o "mac-build/${rid#osx-}"
+          done
+          cp "packaging/mac/Start Mac Cleanup.command" packaging/mac/README.txt mac-build/
+          chmod +x "mac-build/Start Mac Cleanup.command" mac-build/*/NightTechMacCleanup
+          codesign --verify mac-build/arm64/NightTechMacCleanup
+          # Smoke test: starts, prints its header, and exits when input ends.
+          ./mac-build/arm64/NightTechMacCleanup < /dev/null | head -3
+          # A zip made on a Mac keeps the "executable" permission (a Windows-made zip wouldn't).
+          mkdir -p mac-zip && ditto -c -k mac-build mac-zip/NightTechMacCleanup.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-cleanup
+          path: mac-build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-cleanup-zip
+          path: mac-zip
+
   build:
+    needs: mac
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-cleanup
+          path: mac-build
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-cleanup-zip
+          path: mac-zip
 
       - uses: actions/setup-dotnet@v4
         with:
