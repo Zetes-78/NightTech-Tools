@@ -1,0 +1,276 @@
+<Window x:Class="NightTech.Cleanup.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Night Tech Cleanup"
+        Width="1180" Height="860" MinWidth="980" MinHeight="680"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource Page}"
+        Icon="Assets/logo-icon.png"
+        Closing="Window_Closing">
+  <Window.Resources>
+    <Style TargetType="DataGrid">
+      <Setter Property="AutoGenerateColumns" Value="False" />
+      <Setter Property="CanUserAddRows" Value="False" />
+      <Setter Property="HeadersVisibility" Value="Column" />
+      <Setter Property="GridLinesVisibility" Value="Horizontal" />
+      <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource Line}" />
+      <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+      <Setter Property="RowHeight" Value="28" />
+      <Setter Property="Background" Value="White" />
+    </Style>
+    <Style TargetType="TabItem">
+      <Setter Property="Padding" Value="16,8" />
+      <Setter Property="FontSize" Value="14" />
+    </Style>
+  </Window.Resources>
+  <DockPanel>
+    <Border DockPanel.Dock="Top" Background="{StaticResource Navy}" Padding="20,14">
+      <DockPanel>
+        <Border DockPanel.Dock="Left" Background="White" CornerRadius="8" Padding="4" Margin="0,0,14,0">
+          <Image Source="Assets/logo-icon.png" Width="40" Height="40" />
+        </Border>
+        <TextBlock DockPanel.Dock="Right" x:Name="VersionText" Foreground="#A9BFD9" VerticalAlignment="Center" />
+        <StackPanel VerticalAlignment="Center">
+          <TextBlock Text="Night Tech Cleanup" Foreground="White" FontSize="20" FontWeight="SemiBold" />
+          <TextBlock Text="PC cleanup: junk, startup, unwanted programs, security scan and Windows repairs, with a before-and-after report."
+                     Foreground="#DBE7F5" FontSize="13" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="16,8">
+      <DockPanel>
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+          <Button DockPanel.Dock="Right" x:Name="StopButton" Content="Stop" Style="{StaticResource PlainButton}" Click="Stop_Click" IsEnabled="False" />
+          <TextBlock x:Name="BusyText" FontWeight="SemiBold" VerticalAlignment="Center" Text="Ready" />
+        </DockPanel>
+        <ProgressBar DockPanel.Dock="Top" x:Name="Busy" Height="6" Margin="0,0,0,6" Foreground="{StaticResource Orange}" />
+        <ListBox x:Name="LogList" Height="96" BorderThickness="0" FontFamily="Consolas" FontSize="12" />
+      </DockPanel>
+    </Border>
+
+    <TabControl x:Name="Tabs" Margin="16,12" Background="{StaticResource Page}" BorderThickness="0">
+
+      <!-- START -->
+      <TabItem Header="1. Start">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <Grid Margin="0,12,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="1*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+              <Border Style="{StaticResource Card}">
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="120" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                  <Grid.RowDefinitions><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
+                  <TextBlock Grid.ColumnSpan="2" Text="Job" Style="{StaticResource SectionTitle}" />
+                  <TextBlock Grid.Row="1" Text="Customer" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="1" Grid.Column="1" x:Name="CustomerBox" Margin="0,4" />
+                  <TextBlock Grid.Row="2" Text="Hub ticket #" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="2" Grid.Column="1" x:Name="TicketBox" Margin="0,4" />
+                  <TextBlock Grid.Row="3" Text="Technician" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="3" Grid.Column="1" x:Name="TechBox" Margin="0,4" />
+                  <TextBlock Grid.Row="4" Grid.ColumnSpan="2" x:Name="UserNote" TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,6,0,0" />
+                </Grid>
+              </Border>
+              <Border Style="{StaticResource Card}" BorderBrush="{StaticResource Orange}" Background="{StaticResource OrangeSoft}">
+                <StackPanel>
+                  <TextBlock Text="Quick cleanup (the $50 job)" Style="{StaticResource SectionTitle}" />
+                  <TextBlock TextWrapping="Wrap" Margin="0,0,0,10"
+                             Text="Restore point, before measurements, junk removal (the checked categories), suggested startup changes, a Defender update and quick scan, old Windows component cleanup and drive optimization. Then review Programs and Security yourself, and finish on the Finish tab." />
+                  <Button x:Name="QuickButton" Content="Run quick cleanup" Style="{StaticResource PrimaryButton}" Click="Quick_Click" />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+              <Border Style="{StaticResource Card}">
+                <StackPanel>
+                  <TextBlock Text="Safety first" Style="{StaticResource SectionTitle}" />
+                  <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,0,0,8"
+                             Text="A restore point lets Windows go back to how it was before today. Make one before changing anything (Quick cleanup does it for you)." />
+                  <Button x:Name="RestoreButton" Content="Make a restore point" Style="{StaticResource PlainButton}" Click="Restore_Click" HorizontalAlignment="Left" />
+                  <TextBlock x:Name="RestoreText" TextWrapping="Wrap" Margin="0,8,0,0" />
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource Card}">
+                <StackPanel>
+                  <DockPanel>
+                    <Button DockPanel.Dock="Right" x:Name="MeasureButton" Content="Measure now" Style="{StaticResource PlainButton}" Click="Measure_Click" />
+                    <TextBlock Text="Before" Style="{StaticResource SectionTitle}" />
+                  </DockPanel>
+                  <TextBlock x:Name="BeforeText" TextWrapping="Wrap" FontFamily="Consolas" Text="Not measured yet." />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </Grid>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- JUNK -->
+      <TabItem Header="2. Junk">
+        <DockPanel Margin="0,12,0,0">
+          <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+            <Button x:Name="ScanJunkButton" Content="Scan for junk" Style="{StaticResource PrimaryButton}" Click="ScanJunk_Click" Margin="0,0,10,0" />
+            <Button x:Name="CleanJunkButton" Content="Remove checked junk" Style="{StaticResource PlainButton}" Click="CleanJunk_Click" Margin="0,0,10,0" IsEnabled="False" />
+            <Button Content="Close browsers" Style="{StaticResource PlainButton}" Click="CloseBrowsers_Click" ToolTip="Closes Chrome, Edge, Brave and Firefox so their caches can be cleared. Ask the customer to save anything open first." />
+          </WrapPanel>
+          <TextBlock DockPanel.Dock="Bottom" x:Name="JunkTotal" FontWeight="SemiBold" Margin="0,8,0,0" />
+          <DataGrid x:Name="JunkGrid">
+            <DataGrid.Columns>
+              <DataGridCheckBoxColumn Header="Remove" Binding="{Binding Selected, UpdateSourceTrigger=PropertyChanged}" Width="70" />
+              <DataGridTextColumn Header="What" Binding="{Binding Name}" Width="230" IsReadOnly="True" />
+              <DataGridTextColumn Header="Size" Binding="{Binding SizeText}" Width="90" IsReadOnly="True" />
+              <DataGridTextColumn Header="Files" Binding="{Binding FilesText}" Width="80" IsReadOnly="True" />
+              <DataGridTextColumn Header="About" Binding="{Binding About}" Width="*" IsReadOnly="True">
+                <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap" /></Style></DataGridTextColumn.ElementStyle>
+              </DataGridTextColumn>
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+
+      <!-- STARTUP -->
+      <TabItem Header="3. Startup">
+        <DockPanel Margin="0,12,0,0">
+          <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+            <Button Content="Refresh" Style="{StaticResource PlainButton}" Click="LoadStartup_Click" Margin="0,0,10,0" />
+            <Button x:Name="ApplySuggestButton" Content="Turn off everything marked 'Turn off'" Style="{StaticResource PrimaryButton}" Click="ApplyStartup_Click" Margin="0,0,10,0" />
+            <Button Content="Undo today's startup changes" Style="{StaticResource PlainButton}" Click="UndoStartup_Click" />
+          </WrapPanel>
+          <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,8,0,0"
+                     Text="Tick or untick 'On' to change one item. Items are switched off the same way Task Manager does it, so the customer can turn any back on later. Ask about anything marked Unknown or Optional." />
+          <DataGrid x:Name="StartupGrid" CellEditEnding="StartupGrid_CellEditEnding">
+            <DataGrid.Columns>
+              <DataGridCheckBoxColumn Header="On" Binding="{Binding On, UpdateSourceTrigger=PropertyChanged}" Width="50" />
+              <DataGridTextColumn Header="Program" Binding="{Binding Name}" Width="200" IsReadOnly="True" />
+              <DataGridTextColumn Header="Publisher" Binding="{Binding Publisher}" Width="170" IsReadOnly="True" />
+              <DataGridTextColumn Header="Suggestion" Binding="{Binding AdviceText}" Width="100" IsReadOnly="True" />
+              <DataGridTextColumn Header="Why" Binding="{Binding Why}" Width="*" IsReadOnly="True" />
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+
+      <!-- PROGRAMS -->
+      <TabItem Header="4. Programs">
+        <DockPanel Margin="0,12,0,0">
+          <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+            <Button Content="Refresh" Style="{StaticResource PlainButton}" Click="LoadPrograms_Click" Margin="0,0,10,0" />
+            <Button x:Name="UninstallButton" Content="Uninstall selected" Style="{StaticResource PrimaryButton}" Click="Uninstall_Click" Margin="0,0,10,0" />
+            <CheckBox x:Name="FlaggedOnlyBox" Content="Only show flagged programs" IsChecked="True" Click="FlaggedOnly_Click" VerticalAlignment="Center" />
+          </WrapPanel>
+          <TextBlock DockPanel.Dock="Bottom" x:Name="ProgramNotes" TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,8,0,0" />
+          <DataGrid x:Name="ProgramGrid" SelectionMode="Extended">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Flag" Binding="{Binding LevelText}" Width="80" IsReadOnly="True" />
+              <DataGridTextColumn Header="Program" Binding="{Binding Name}" Width="260" IsReadOnly="True" />
+              <DataGridTextColumn Header="Publisher" Binding="{Binding Publisher}" Width="170" IsReadOnly="True" />
+              <DataGridTextColumn Header="Installed" Binding="{Binding InstalledText}" Width="90" IsReadOnly="True" />
+              <DataGridTextColumn Header="Size" Binding="{Binding SizeText}" Width="80" IsReadOnly="True" />
+              <DataGridTextColumn Header="Why" Binding="{Binding Why}" Width="*" IsReadOnly="True" />
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+
+      <!-- SECURITY -->
+      <TabItem Header="5. Security">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel Margin="0,12,0,0">
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <TextBlock Text="Microsoft Defender scan" Style="{StaticResource SectionTitle}" />
+                <TextBlock x:Name="DefenderText" TextWrapping="Wrap" Margin="0,0,0,8" Text="Checking..." />
+                <WrapPanel>
+                  <Button x:Name="QuickScanButton" Content="Update and quick scan" Style="{StaticResource PrimaryButton}" Click="QuickScan_Click" Margin="0,0,10,0" />
+                  <Button x:Name="FullScanButton" Content="Full scan (an hour or more)" Style="{StaticResource PlainButton}" Click="FullScan_Click" Margin="0,0,10,0" />
+                  <Button Content="Open Windows Security" Style="{StaticResource PlainButton}" Click="OpenSecurity_Click" />
+                </WrapPanel>
+                <TextBlock x:Name="ThreatText" TextWrapping="Wrap" Margin="0,8,0,0" />
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <DockPanel>
+                  <Button DockPanel.Dock="Right" Content="Check again" Style="{StaticResource PlainButton}" Click="CheckHijacks_Click" />
+                  <TextBlock Text="Browsers, proxy and hosts file" Style="{StaticResource SectionTitle}" />
+                </DockPanel>
+                <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,0,0,8"
+                           Text="Signs of adware: a strange search engine or start page, unknown extensions, a proxy, or a changed hosts file. Remove unknown extensions in the browser itself (with the customer)." />
+                <ListBox x:Name="HijackList" MinHeight="120" MaxHeight="300" BorderBrush="{StaticResource Line}" />
+                <WrapPanel Margin="0,8,0,0">
+                  <Button x:Name="ResetProxyButton" Content="Turn off the proxy" Style="{StaticResource PlainButton}" Click="ResetProxy_Click" Margin="0,0,10,0" IsEnabled="False" />
+                  <Button x:Name="ResetHostsButton" Content="Reset the hosts file (saves a copy)" Style="{StaticResource PlainButton}" Click="ResetHosts_Click" IsEnabled="False" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- REPAIR -->
+      <TabItem Header="6. Repair">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel Margin="0,12,0,0">
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <TextBlock Text="Windows repairs" Style="{StaticResource SectionTitle}" />
+                <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,0,0,10"
+                           Text="Windows' own tools. Run the image repair first if the file check says it couldn't fix something. Each one can take a while; the PC can be used meanwhile." />
+                <WrapPanel>
+                  <Button Content="Check Windows files (SFC)" Style="{StaticResource ToolButton}" Tag="sfc" Click="Repair_Click" />
+                  <Button Content="Repair the Windows image (DISM)" Style="{StaticResource ToolButton}" Tag="dism" Click="Repair_Click" />
+                  <Button Content="Remove old Windows components" Style="{StaticResource ToolButton}" Tag="components" Click="Repair_Click" />
+                  <Button Content="Optimize the drive" Style="{StaticResource ToolButton}" Tag="optimize" Click="Repair_Click" />
+                  <Button Content="Check the drive for errors (read only)" Style="{StaticResource ToolButton}" Tag="chkdsk" Click="Repair_Click" />
+                  <Button Content="Clear saved web addresses (DNS)" Style="{StaticResource ToolButton}" Tag="dns" Click="Repair_Click" />
+                  <Button Content="Open Windows Update" Style="{StaticResource ToolButton}" Tag="update" Click="Repair_Click" />
+                </WrapPanel>
+                <TextBlock x:Name="RepairText" TextWrapping="Wrap" Margin="0,8,0,0" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- FINISH -->
+      <TabItem Header="7. Finish">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <Grid Margin="0,12,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="1*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+              <Border Style="{StaticResource Card}">
+                <StackPanel>
+                  <TextBlock Text="Before and after" Style="{StaticResource SectionTitle}" />
+                  <TextBlock x:Name="CompareText" TextWrapping="Wrap" FontFamily="Consolas" Text="Measure again after the work to see the difference." />
+                  <Button Content="Measure after" Style="{StaticResource PlainButton}" Click="MeasureAfter_Click" HorizontalAlignment="Left" Margin="0,10,0,0" />
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource Card}">
+                <StackPanel>
+                  <TextBlock Text="Recommendations" Style="{StaticResource SectionTitle}" />
+                  <TextBlock x:Name="RecommendText" TextWrapping="Wrap" Text="-" />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+              <Border Style="{StaticResource Card}">
+                <StackPanel>
+                  <TextBlock Text="Notes for the customer (optional)" Style="{StaticResource SectionTitle}" />
+                  <TextBox x:Name="NotesBox" Height="90" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" />
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource Card}" BorderBrush="{StaticResource Orange}" Background="{StaticResource OrangeSoft}">
+                <StackPanel>
+                  <TextBlock Text="Report" Style="{StaticResource SectionTitle}" />
+                  <TextBlock TextWrapping="Wrap" Margin="0,0,0,10" Text="Saves the customer's report (.html, prints well), a text copy and a .json for the Hub ticket." />
+                  <Button Content="Save and open the report" Style="{StaticResource PrimaryButton}" Click="Report_Click" />
+                  <TextBlock x:Name="ReportText" TextWrapping="Wrap" Margin="0,8,0,0" />
+                  <Button Content="Open the reports folder" Style="{StaticResource PlainButton}" Click="OpenReports_Click" HorizontalAlignment="Left" Margin="0,8,0,0" />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </Grid>
+        </ScrollViewer>
+      </TabItem>
+    </TabControl>
+  </DockPanel>
+</Window>
