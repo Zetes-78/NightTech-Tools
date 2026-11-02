@@ -264,6 +264,20 @@ public class DiagnosticsTests
     public void Safe_file_names(string input, string expected) => Assert.Equal(expected, Format.SafeFileName(input));
 
     [Theory]
+    [InlineData("System manufacturer", true)]
+    [InlineData("System Product Name", true)]
+    [InlineData("System Serial Number", true)]
+    [InlineData("To Be Filled By O.E.M.", true)]
+    [InlineData("Default string", true)]
+    [InlineData("0000000000", true)]
+    [InlineData("  ", true)]
+    [InlineData("Dell Inc.", false)]
+    [InlineData("ASUSTeK COMPUTER INC.", false)]
+    [InlineData("WD-WMC6Y0K1L50X", false)]
+    public void Bios_filler_text_is_recognised(string value, bool placeholder) =>
+        Assert.Equal(placeholder, Format.IsPlaceholder(value));
+
+    [Theory]
     [InlineData(512L, "512 bytes")]
     [InlineData(1536L, "1.5 KB")]
     [InlineData(500L * 1024 * 1024 * 1024, "500 GB")]

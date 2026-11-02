@@ -81,7 +81,7 @@ public static class ReportWriter
         Row("Make and model", Join(" ", c.Manufacturer, c.Model));
         Row("Serial number", c.SerialNumber);
         Row("Windows", Join(" ", c.OsName, c.OsArchitecture, string.IsNullOrEmpty(c.OsBuild) ? "" : "build " + c.OsBuild));
-        Row("Installed", c.OsInstallDate is null ? null : Format.Date(c.OsInstallDate));
+        Row("Installed or upgraded", c.OsInstallDate is null ? null : Format.Date(c.OsInstallDate));
         Row("Last restart", c.LastBoot is null ? null : Format.DateAndTime(c.LastBoot));
         Row("Newest update", c.LastUpdateInstalled is null ? null : Format.Date(c.LastUpdateInstalled));
         Row("Processor", Join(", ", c.Cpu, c.CpuCores is null ? "" : $"{c.CpuCores} cores / {c.CpuThreads} threads"));

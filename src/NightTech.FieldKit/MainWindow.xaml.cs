@@ -78,7 +78,8 @@ public partial class MainWindow : Window
                 App.Log.Error("Saving the report failed.", ex);
             }
             CopyButton.IsEnabled = true;
-            StatusText.Text = $"Finished in {(report.Finished - report.Started).TotalSeconds:0} seconds.";
+            var secs = (int)Math.Round((report.Finished - report.Started).TotalSeconds);
+            StatusText.Text = secs == 1 ? "Finished in 1 second." : $"Finished in {secs} seconds.";
         }
         catch (Exception ex)
         {

@@ -11,7 +11,7 @@
     <AssemblyName>NightTechFieldKit</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\NightTechFieldKit.ico</ApplicationIcon>
-    <Version>0.1.0</Version>
+    <Version>0.1.2</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Company>Night Tech Solutions</Company>
     <Product>Night Tech Field Kit</Product>

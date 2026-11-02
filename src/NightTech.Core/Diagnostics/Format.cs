@@ -31,6 +31,26 @@ public static class Format
         null => "not checked",
     };
 
+    private static readonly string[] Placeholders =
+    {
+        "system manufacturer", "system product name", "system serial number", "system version",
+        "to be filled by o.e.m.", "to be filled by oem", "default string", "default", "o.e.m.", "oem",
+        "not applicable", "not specified", "not available", "none", "n/a", "invalid", "unknown",
+        "base board serial number", "chassis serial number", "0", "00000000", "123456789", "1234567890", "x.x",
+    };
+
+    /// <summary>
+    /// True for the filler text motherboard makers leave in the BIOS when no PC maker filled it in
+    /// (common on custom-built PCs), such as "System Product Name" or "To Be Filled By O.E.M.".
+    /// </summary>
+    public static bool IsPlaceholder(string? value)
+    {
+        var v = (value ?? "").Trim();
+        if (v.Length == 0) return true;
+        if (v.Trim('0', ' ', '-', '.', 'x', 'X', 'f', 'F').Length == 0) return true;
+        return Placeholders.Contains(v.ToLowerInvariant());
+    }
+
     /// <summary>A file name made only of safe characters, e.g. "NT-0012-DESKTOP-ABC-20261101-1830".</summary>
     public static string SafeFileName(string text, int max = 80)
     {

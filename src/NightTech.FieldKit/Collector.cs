@@ -118,6 +118,34 @@ public static class Collector
             c.BiosVersion = Str(o, "SMBIOSBIOSVersion");
             c.BiosDate = CimDate(o, "ReleaseDate");
         }
+
+        // Custom-built PCs often leave filler text ("System Product Name") where the PC maker's details go.
+        // Use the motherboard's own make, model and serial instead.
+        var makerMissing = Format.IsPlaceholder(c.Manufacturer) || Format.IsPlaceholder(c.Model);
+        if (makerMissing || Format.IsPlaceholder(c.SerialNumber))
+        {
+            try
+            {
+                foreach (var o in Query(@"root\CIMV2", "SELECT Manufacturer, Product, SerialNumber FROM Win32_BaseBoard"))
+                {
+                    var boardMaker = Str(o, "Manufacturer");
+                    var boardModel = Str(o, "Product");
+                    var boardSerial = Str(o, "SerialNumber");
+                    if (makerMissing)
+                    {
+                        c.Manufacturer = Format.IsPlaceholder(boardMaker) ? "" : boardMaker;
+                        c.Model = Format.IsPlaceholder(boardModel) ? "Custom-built PC" : boardModel + " motherboard (custom-built PC)";
+                    }
+                    if (Format.IsPlaceholder(c.SerialNumber))
+                        c.SerialNumber = Format.IsPlaceholder(boardSerial) ? "" : boardSerial + " (motherboard)";
+                    break;
+                }
+            }
+            catch { /* keep what the BIOS said */ }
+            if (Format.IsPlaceholder(c.Manufacturer)) c.Manufacturer = "";
+            if (Format.IsPlaceholder(c.Model)) c.Model = "Custom-built PC";
+            if (Format.IsPlaceholder(c.SerialNumber)) c.SerialNumber = "";
+        }
         foreach (var o in Query(@"root\CIMV2", "SELECT Caption, Version, BuildNumber, OSArchitecture, InstallDate, LastBootUpTime FROM Win32_OperatingSystem"))
         {
             c.OsName = Str(o, "Caption");
