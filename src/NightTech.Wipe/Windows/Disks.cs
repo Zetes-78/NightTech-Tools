@@ -12,19 +12,27 @@ namespace NightTech.Wipe.Windows;
 /// <summary>A volume (partition Windows can read) that lives on a physical drive.</summary>
 public sealed record VolumeOnDisk(string VolumeName, string Paths, string Label, long Size, long Free);
 
+/// <summary>What identifies one physical drive. Read again through the write handle right before erasing.</summary>
+public sealed record DiskIdentity(string Model, string Serial, long Size, int SectorSize, string LayoutId);
+
 /// <summary>A physical drive (\\.\PhysicalDriveN) and why, if at all, it must not be wiped.</summary>
 public sealed record DiskInfo(int Number, string Model, string Serial, string Bus, string MediaType, long Size, int SectorSize,
-    bool WriteProtected, IReadOnlyList<VolumeOnDisk> Volumes, IReadOnlyList<string> ProtectedReasons)
+    string LayoutId, bool WriteProtected, IReadOnlyList<VolumeOnDisk> Volumes, IReadOnlyList<string> ProtectedReasons)
 {
     public string Path => $@"\\.\PhysicalDrive{Number}";
     public bool IsProtected => ProtectedReasons.Count > 0;
+
+    /// <summary>The serial, unless it's missing or filler text (some USB docks report none, zeros, or their own).</summary>
+    public string UsableSerial => Format.IsPlaceholder(Serial) ? "" : Serial;
+
+    public DiskIdentity Identity => new(Model, Serial, Size, SectorSize, LayoutId);
 
     public string Display
     {
         get
         {
             var sb = new StringBuilder($"Disk {Number}: {Model}  ({Format.Bytes(Size)}, {MediaType}, {Bus})");
-            if (!string.IsNullOrWhiteSpace(Serial)) sb.Append($"  S/N {Serial}");
+            sb.Append(UsableSerial.Length > 0 ? $"  S/N {UsableSerial}" : "  (no usable serial number)");
             if (IsProtected) sb.Append("  [PROTECTED: " + string.Join("; ", ProtectedReasons) + "]");
             else if (WriteProtected) sb.Append("  [WRITE-PROTECTED]");
             return sb.ToString();
@@ -40,13 +48,14 @@ public sealed record DiskInfo(int Number, string Model, string Serial, string Bu
 public static class Disks
 {
     /// <summary>
-    /// Every physical drive, with the reasons a drive is protected:
-    /// it holds Windows or the boot files, this program, or the folder reports are saved to.
+    /// Every physical drive, with the reasons a drive is protected. When in doubt, drives are protected:
+    /// if Windows can't say which drive holds Windows or this PC's boot partition, every drive is.
     /// </summary>
     public static List<DiskInfo> List(string reportsFolder)
     {
         var volumes = AllVolumes();
         var protect = new Dictionary<int, List<string>>();
+        var protectAll = new List<string>();
         void Protect(IEnumerable<int> disks, string why)
         {
             foreach (var d in disks)
@@ -56,20 +65,26 @@ public static class Disks
             }
         }
 
+        bool winPe = IsWinPE();
         var systemRoot = System.IO.Path.GetPathRoot(Environment.SystemDirectory) ?? @"C:\";
-        Protect(DisksOfPath(systemRoot, volumes), "holds Windows");
-        Protect(DisksOfPath(AppContext.BaseDirectory, volumes), "holds this program");
-        Protect(DisksOfPath(reportsFolder, volumes), "reports are saved here");
+        var windowsDisks = DisksOfPath(systemRoot);
+        if (windowsDisks.Count == 0 && !winPe) protectAll.Add("couldn't confirm which drive holds Windows");
+        Protect(windowsDisks, "holds Windows");
+        Protect(DisksOfPath(AppContext.BaseDirectory), "holds this program");
+        Protect(DisksOfPath(reportsFolder), "reports are saved here");
         // This PC's boot partition (EFI or System Reserved) usually has no drive letter.
-        foreach (var v in volumes.Where(v => v.IsBootOrSystem)) Protect(v.Disks, "holds this PC's boot files");
+        var bootVolumes = volumes.Where(v => v.IsBootOrSystem).ToList();
+        foreach (var v in bootVolumes) Protect(v.Disks, "holds this PC's boot files");
+        if (!winPe && SystemPartitionDevice().Length > 0 && bootVolumes.Count == 0)
+            protectAll.Add("couldn't find this PC's boot partition");
 
         var list = new List<DiskInfo>();
         for (int n = 0; n < 64; n++)
         {
             using var h = Open($@"\\.\PhysicalDrive{n}", GENERIC_READ);
             if (h.IsInvalid) continue;
-            if (!TryGeometry(h, out long size, out int sector) || size <= 0) continue;
-            var (model, serial, bus) = QueryDescriptor(h);
+            if (ReadIdentity(h) is not { } id) continue;
+            var bus = QueryBus(h);
             var media = QueryMedia(h, bus);
             bool writable = DeviceIoControl(h, IOCTL_DISK_IS_WRITABLE, null, 0, null, 0, out _, IntPtr.Zero)
                             || Marshal.GetLastWin32Error() != ERROR_WRITE_PROTECT;
@@ -77,21 +92,78 @@ public static class Disks
                 .Select(v => new VolumeOnDisk(v.Name, v.Paths, v.Label, v.Size, v.Free)).ToList();
             if (volumes.Any(v => v.Disks.Contains(n) && v.Disks.Count > 1))
                 Protect(new[] { n }, "part of a volume spread over several drives");
-            list.Add(new DiskInfo(n, model, serial, bus, media, size, sector, !writable, onDisk,
-                protect.TryGetValue(n, out var why) ? why : new List<string>()));
+            if (bus is "Virtual" or "Virtual file" or "Storage Spaces" or "RAID")
+                Protect(new[] { n }, bus == "RAID" ? "a RAID set (erase its drives one at a time instead)" : "a virtual or pooled drive");
+            list.Add(new DiskInfo(n, id.Model, id.Serial, bus, media, id.Size, id.SectorSize, id.LayoutId, !writable, onDisk,
+                new List<string>()));
         }
-        return list;
+
+        // Two connected drives that look the same (same model and size, and the same or no serial) can't be told apart
+        // reliably, for example in some USB docks. Protect both: connect one at a time.
+        foreach (var group in list.GroupBy(d => (d.Model, d.Size, Serial: Format.IsPlaceholder(d.Serial) ? "" : d.Serial)).Where(g => g.Count() > 1))
+            Protect(group.Select(d => d.Number), "looks identical to another connected drive (connect one at a time)");
+
+        return list.Select(d => d with
+        {
+            ProtectedReasons = protectAll.Concat(protect.TryGetValue(d.Number, out var why) ? why : new List<string>()).ToList(),
+        }).ToList();
     }
 
-    /// <summary>Re-reads a drive right before wiping and checks it's still the same one (drives can renumber when plugged in or out).</summary>
+    /// <summary>
+    /// Re-lists the drives right before erasing and checks the picked one is still the same drive, in the same place,
+    /// and still not protected (drives can renumber when plugged in or out).
+    /// </summary>
     public static bool StillTheSame(DiskInfo picked, string reportsFolder, out string problem)
     {
         var now = List(reportsFolder).FirstOrDefault(d => d.Number == picked.Number);
         problem = now is null ? "The drive is no longer connected."
-            : now.Model != picked.Model || now.Serial != picked.Serial || now.Size != picked.Size ? "A different drive is now in that position."
+            : now.Identity != picked.Identity ? "A different drive is now in that position."
             : now.IsProtected ? "The drive is now protected: " + string.Join("; ", now.ProtectedReasons) + "."
             : "";
         return problem.Length == 0;
+    }
+
+    private static bool IsWinPE()
+    {
+        try
+        {
+            using var hklm = Microsoft.Win32.RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry64);
+            using var key = hklm.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\MiniNT");
+            return key is not null;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Model, serial, size, sector size and partition-table ID, read through an open handle.</summary>
+    internal static DiskIdentity? ReadIdentity(SafeFileHandle h)
+    {
+        if (!TryGeometry(h, out long size, out int sector) || size <= 0) return null;
+        var (model, serial, _) = QueryDescriptor(h);
+        return new DiskIdentity(model, serial, size, sector, LayoutId(h));
+    }
+
+    /// <summary>"MBR:1A2B3C4D", "GPT:{guid}", "RAW" (no partition table) or "?" if Windows wouldn't say.</summary>
+    private static string LayoutId(SafeFileHandle h)
+    {
+        var buf = new byte[64 * 1024];
+        if (!DeviceIoControl(h, IOCTL_DISK_GET_DRIVE_LAYOUT_EX, null, 0, buf, (uint)buf.Length, out uint got, IntPtr.Zero) || got < 24)
+            return "?";
+        // DRIVE_LAYOUT_INFORMATION_EX: PartitionStyle (4), PartitionCount (4), then MBR { Signature (4) } or GPT { DiskId (16) }.
+        return BitConverter.ToInt32(buf, 0) switch
+        {
+            0 => "MBR:" + BitConverter.ToUInt32(buf, 8).ToString("X8"),
+            1 => "GPT:" + new Guid(buf.AsSpan(8, 16)).ToString("B"),
+            _ => "RAW",
+        };
+    }
+
+    /// <summary>The disk number Windows currently gives the drive behind this handle.</summary>
+    internal static int DeviceNumber(SafeFileHandle h)
+    {
+        var buf = new byte[12];
+        // STORAGE_DEVICE_NUMBER: DeviceType (4), DeviceNumber (4), PartitionNumber (4)
+        return DeviceIoControl(h, IOCTL_STORAGE_GET_DEVICE_NUMBER, null, 0, buf, (uint)buf.Length, out uint got, IntPtr.Zero) && got >= 8
+            ? BitConverter.ToInt32(buf, 4) : -1;
     }
 
     // ---------------- Volumes ----------------
@@ -183,7 +255,7 @@ public static class Disks
         return result;
     }
 
-    private static HashSet<int> DisksOfPath(string path, List<Vol> volumes)
+    private static HashSet<int> DisksOfPath(string path)
     {
         try
         {
@@ -257,6 +329,8 @@ public static class Disks
         return true;
     }
 
+    private static string QueryBus(SafeFileHandle h) => QueryDescriptor(h).Bus;
+
     private static (string Model, string Serial, string Bus) QueryDescriptor(SafeFileHandle h)
     {
         // STORAGE_PROPERTY_QUERY { PropertyId = StorageDeviceProperty (0), QueryType = PropertyStandardQuery (0) }
@@ -319,7 +393,11 @@ public sealed class VolumeLocks : IDisposable
     }
 }
 
-/// <summary>A physical drive opened for writing. Only created after the technician has confirmed and the volumes are locked.</summary>
+/// <summary>
+/// A physical drive opened for writing. Only created after the technician has confirmed. The drive behind the handle
+/// is checked against what was confirmed (number, model, serial, size, partition-table ID) through this same handle,
+/// so a drive swapped in afterwards can't be the one written to.
+/// </summary>
 public sealed class RawWipeTarget : IWipeTarget
 {
     private readonly SafeFileHandle _h;
@@ -332,11 +410,19 @@ public sealed class RawWipeTarget : IWipeTarget
         _h = Disks.Open(disk.Path, GENERIC_READ | GENERIC_WRITE, FILE_FLAG_WRITE_THROUGH);
         if (_h.IsInvalid)
             throw new Win32Exception(Marshal.GetLastWin32Error(), $"Couldn't open {disk.Path} for writing. Run Night Tech Wipe as administrator.");
-        if (!Disks.TryGeometry(_h, out long size, out int sector) || size != disk.Size || sector != disk.SectorSize)
-        {
-            _h.Dispose();
-            throw new IOException("The drive's size changed since it was listed. Refresh the drive list.");
-        }
+        try { CheckIdentity(); }
+        catch { _h.Dispose(); throw; }
+    }
+
+    /// <summary>Throws unless the drive behind the open handle is exactly the one the technician confirmed.</summary>
+    public void CheckIdentity()
+    {
+        var now = Disks.ReadIdentity(_h);
+        if (now is null)
+            throw new IOException("Couldn't read the drive's details. Nothing was erased.");
+        if (Disks.DeviceNumber(_h) != _disk.Number || now != _disk.Identity)
+            throw new IOException("This isn't the drive you confirmed (it was unplugged, swapped or renumbered). " +
+                                  "Nothing was erased. Refresh the drive list and confirm again.");
     }
 
     public string Description => $"{_disk.Model} ({_disk.Bus})";
@@ -368,7 +454,7 @@ public sealed class RawWipeTarget : IWipeTarget
         int err = Marshal.GetLastWin32Error();
         var inner = new Win32Exception(err);
         if (err is ERROR_FILE_NOT_FOUND or ERROR_PATH_NOT_FOUND or ERROR_NOT_READY or ERROR_DEV_NOT_EXIST or ERROR_NO_SUCH_DEVICE
-            or ERROR_DEVICE_NOT_CONNECTED or ERROR_DEVICE_REMOVED or ERROR_INVALID_HANDLE)
+            or ERROR_DEVICE_NOT_CONNECTED or ERROR_DEVICE_REMOVED or ERROR_INVALID_HANDLE or ERROR_SEM_TIMEOUT)
             throw new DeviceGoneException($"Drive stopped responding during {what} at byte {offset:N0}: {inner.Message}", inner);
         // Refused writes are not bad sectors: stop rather than mark the whole drive as failed sectors.
         if (err is ERROR_ACCESS_DENIED or ERROR_WRITE_PROTECT)

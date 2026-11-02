@@ -12,6 +12,7 @@ internal sealed class FakeWipeTarget : IWipeTarget
     public HashSet<long> BadReadSectors { get; } = new();    // read throws
     public long GoneAfterBytesWritten { get; set; } = -1;    // drive unplugged
     public Action<long>? OnWrite { get; set; }
+    public long ThrowOtherAt { get; set; } = -1;             // a non-disk error (bug, out of memory...)
     public int Flushes { get; private set; }
     private long _written;
 
@@ -29,6 +30,7 @@ internal sealed class FakeWipeTarget : IWipeTarget
     public void WriteExactly(long offset, byte[] buffer, int count)
     {
         OnWrite?.Invoke(offset);
+        if (ThrowOtherAt >= 0 && offset >= ThrowOtherAt) throw new InvalidOperationException("something unexpected");
         if (GoneAfterBytesWritten >= 0 && _written >= GoneAfterBytesWritten) throw new DeviceGoneException("unplugged");
         for (long s = offset; s < offset + count; s += SectorSize)
             if (BadWriteSectors.Contains(s / SectorSize)) throw new IOException("bad sector");
@@ -200,6 +202,63 @@ public class WipeEngineTests
         Assert.False(rep.FullyVerified);
         Assert.Contains("Do not treat", rep.ToText());
         Assert.DoesNotContain(rep.Limitations, l => l.Contains("solid-state"));
+    }
+
+    [Fact]
+    public void Drive_with_4096_byte_sectors_and_a_partial_last_block_is_fully_covered_with_random_data()
+    {
+        var d = new FakeWipeTarget(sectors: 11, sectorSize: 4096, fill: 0x55);   // 44 KB, blocks of 16 KB
+        var o = new WipeOptions { Pattern = WipePattern.Random, BlockSize = 16384, Seed = 7 };
+        var r = WipeEngine.Run(d, o, null, CancellationToken.None);
+        Assert.True(r.FullyVerified);
+        var expect = new byte[d.Data.Length];
+        WipeEngine.Fill(expect, expect.Length, 0, o);
+        Assert.Equal(expect, d.Data);
+    }
+
+    [Fact]
+    public void Unexpected_error_after_writing_starts_is_recorded_as_failed_not_lost()
+    {
+        var d = new FakeWipeTarget(64) { ThrowOtherAt = 8192 };
+        var r = WipeEngine.Run(d, Opts(), null, CancellationToken.None);
+        Assert.Equal(WipeStatus.Failed, r.Status);
+        Assert.False(r.FullyVerified);
+        Assert.Contains("partly erased", r.Message);
+    }
+
+    [Fact]
+    public void Too_many_bad_sectors_in_a_row_stops_the_wipe_as_failed()
+    {
+        var d = new FakeWipeTarget(256);
+        for (long s = 40; s < 120; s++) d.BadWriteSectors.Add(s);
+        var o = new WipeOptions { Pattern = WipePattern.Zeros, BlockSize = 4096, MaxBadInARow = 16 };
+        var r = WipeEngine.Run(d, o, null, CancellationToken.None);
+        Assert.Equal(WipeStatus.Failed, r.Status);
+        Assert.Contains("Too many bad sectors in a row", r.Message);
+        Assert.Equal(16, r.WriteErrorSectors);
+    }
+
+    [Fact]
+    public void Stop_works_while_retrying_bad_sectors()
+    {
+        var d = new FakeWipeTarget(64);
+        for (long s = 0; s < 8; s++) d.BadWriteSectors.Add(s);
+        using var cts = new CancellationTokenSource();
+        int calls = 0;
+        d.OnWrite = _ => { if (++calls == 3) cts.Cancel(); };   // cancel during the one-sector retries of the first block
+        var r = WipeEngine.Run(d, Opts(), null, cts.Token);
+        Assert.Equal(WipeStatus.Cancelled, r.Status);
+        Assert.True(r.WriteErrorSectors < 8);
+    }
+
+    [Fact]
+    public void Scattered_bad_sectors_dont_count_as_in_a_row()
+    {
+        var d = new FakeWipeTarget(256);
+        for (long s = 5; s < 256; s += 9) d.BadWriteSectors.Add(s);  // every 9th sector, never two together
+        var o = new WipeOptions { Pattern = WipePattern.Zeros, BlockSize = 4096, MaxBadInARow = 2 };
+        var r = WipeEngine.Run(d, o, null, CancellationToken.None);
+        Assert.Equal(WipeStatus.CompletedWithErrors, r.Status);
     }
 
     private sealed class SyncProgress<T>(Action<T> act) : IProgress<T>

@@ -42,8 +42,10 @@ public sealed class WipeOptions
     /// <summary>Read every sector back after writing and check it holds the pattern.</summary>
     public bool Verify { get; init; } = true;
     public int BlockSize { get; init; } = 1024 * 1024;
-    /// <summary>Seed for the random pattern. Recorded in the report so the verify pass can regenerate the data.</summary>
+    /// <summary>Seed for the random pattern, so the check pass can regenerate exactly what was written.</summary>
     public ulong Seed { get; init; } = (ulong)Random.Shared.NextInt64();
+    /// <summary>Stop as failed after this many bad sectors in a row: the drive is failing and should be destroyed instead.</summary>
+    public int MaxBadInARow { get; init; } = 64;
 }
 
 public sealed record WipeProgress(string Phase, long BytesDone, long BytesTotal, double BytesPerSecond, long ProblemSectors);
@@ -78,6 +80,13 @@ public sealed class WipeResult
 /// Overwrites a whole drive with one pass of a pattern, then reads every sector back to check it.
 /// Bad sectors are retried one at a time and listed; they never stop the wipe.
 /// </summary>
+/// <summary>Too many bad sectors in a row: the drive is failing.</summary>
+public sealed class TooManyBadSectorsException : IOException
+{
+    public TooManyBadSectorsException(long offset)
+        : base($"Too many bad sectors in a row (near byte {offset:N0}). The drive is failing.") { }
+}
+
 public static class WipeEngine
 {
     public static WipeResult Run(IWipeTarget target, WipeOptions options, IProgress<WipeProgress>? progress,
@@ -91,6 +100,7 @@ public static class WipeEngine
         var result = new WipeResult { Started = clock() };
         var buffer = new byte[block];
         var readBack = new byte[block];
+        int badInARow = 0;
         try
         {
             // Pass 1: overwrite.
@@ -100,19 +110,22 @@ public static class WipeEngine
                 try
                 {
                     target.WriteExactly(offset, buffer, count);
+                    badInARow = 0;
                 }
                 catch (IOException ex) when (ex is not DeviceGoneException)
                 {
                     // Retry one sector at a time so a single bad sector doesn't leave the rest of the block unwritten.
                     for (long s = offset; s < offset + count; s += target.SectorSize)
                     {
+                        cancel.ThrowIfCancellationRequested();
                         var one = new byte[target.SectorSize];
                         Fill(one, target.SectorSize, s, options);
-                        try { target.WriteExactly(s, one, target.SectorSize); }
+                        try { target.WriteExactly(s, one, target.SectorSize); badInARow = 0; }
                         catch (IOException e2) when (e2 is not DeviceGoneException)
                         {
                             result.WriteErrorSectors++;
                             result.AddProblem(s, target.SectorSize, "write failed");
+                            if (++badInARow >= options.MaxBadInARow) throw new TooManyBadSectorsException(s);
                         }
                     }
                 }
@@ -129,6 +142,7 @@ public static class WipeEngine
                     {
                         target.ReadExactly(offset, readBack, count);
                         CompareSectors(buffer, readBack, count, offset, target.SectorSize, result);
+                        badInARow = 0;
                     }
                     catch (IOException ex) when (ex is not DeviceGoneException)
                     {
@@ -136,16 +150,19 @@ public static class WipeEngine
                         var want = new byte[target.SectorSize];
                         for (long s = offset; s < offset + count; s += target.SectorSize)
                         {
+                            cancel.ThrowIfCancellationRequested();
                             Fill(want, target.SectorSize, s, options);
                             try
                             {
                                 target.ReadExactly(s, one, target.SectorSize);
                                 CompareSectors(want, one, target.SectorSize, s, target.SectorSize, result);
+                                badInARow = 0;
                             }
                             catch (IOException e2) when (e2 is not DeviceGoneException)
                             {
                                 result.VerifyReadErrorSectors++;
                                 result.AddProblem(s, target.SectorSize, "unreadable when checked");
+                                if (++badInARow >= options.MaxBadInARow) throw new TooManyBadSectorsException(s);
                             }
                         }
                     }
@@ -169,8 +186,14 @@ public static class WipeEngine
             result.Status = WipeStatus.Failed;
             result.Message = "The drive stopped responding: " + ex.Message + " The drive is only partly erased.";
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        catch (TooManyBadSectorsException ex)
         {
+            result.Status = WipeStatus.Failed;
+            result.Message = ex.Message + " The drive is only partly erased: destroy it physically.";
+        }
+        catch (Exception ex)
+        {
+            // Once writing has started, any failure must still produce a record that says the drive is partly erased.
             result.Status = WipeStatus.Failed;
             result.Message = "The wipe stopped: " + ex.Message + " The drive is only partly erased.";
         }

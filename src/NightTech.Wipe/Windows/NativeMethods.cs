@@ -21,6 +21,8 @@ internal static class NativeMethods
     public const uint IOCTL_DISK_IS_WRITABLE = 0x00070024;
     public const uint IOCTL_DISK_UPDATE_PROPERTIES = 0x00070140;
     public const uint IOCTL_STORAGE_QUERY_PROPERTY = 0x002D1400;
+    public const uint IOCTL_STORAGE_GET_DEVICE_NUMBER = 0x002D1080;
+    public const uint IOCTL_DISK_GET_DRIVE_LAYOUT_EX = 0x00070050;
     public const uint IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS = 0x00560000;
     public const uint FSCTL_LOCK_VOLUME = 0x00090018;
     public const uint FSCTL_UNLOCK_VOLUME = 0x0009001C;
@@ -36,6 +38,7 @@ internal static class NativeMethods
     public const int ERROR_NO_SUCH_DEVICE = 433;
     public const int ERROR_DEVICE_NOT_CONNECTED = 1167;
     public const int ERROR_DEVICE_REMOVED = 1617;
+    public const int ERROR_SEM_TIMEOUT = 121;
 
     public const uint ES_CONTINUOUS = 0x80000000;
     public const uint ES_SYSTEM_REQUIRED = 0x00000001;
