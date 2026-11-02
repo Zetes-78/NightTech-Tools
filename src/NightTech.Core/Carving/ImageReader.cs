@@ -162,7 +162,8 @@ internal sealed class ByteSource
             if (n < pattern.Length) return -1;
             int i = block.AsSpan(0, n).IndexOf(pattern);
             if (i >= 0 && pos + i < limit) return pos + i;
-            if (pos + n >= limit || n < block.Length) return -1;
+            // Starts up to pos + n - pattern.Length have been checked; stop only once that covers the limit.
+            if (pos + n - (pattern.Length - 1) >= limit || n < block.Length) return -1;
             pos += n - (pattern.Length - 1);
         }
         return -1;

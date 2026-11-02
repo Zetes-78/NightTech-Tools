@@ -264,6 +264,97 @@ public class CarverTests
         }
     }
 
+    // ---------- Cases found in review ----------
+
+    [Fact]
+    public void Search_finds_a_match_right_at_the_edge_of_a_read_block()
+    {
+        var data = new byte[4_000_000];
+        new Random(1).NextBytes(data);
+        long from = 1000, limit = from + 1024 * 1024, at = limit - 2;
+        "%%EOF"u8.CopyTo(data.AsSpan((int)at));
+        var b = new ByteSource(new MemoryImageReader(data));
+        Assert.Equal(at, b.Find("%%EOF"u8, from, limit));
+        Assert.Equal(at, b.Find("%%EOF"u8, from + 10, data.Length));
+    }
+
+    private static byte[] LinearizedPdf()
+    {
+        // Fast web view: an early %%EOF after the first page's index, and the whole length stated as /L.
+        string Build(long l) => "%PDF-1.4\n1 0 obj <</Linearized 1/L " + l.ToString("D10") + ">> endobj\nxref\ntrailer<</Size 3>>\nstartxref\n0\n%%EOF\n" +
+                                "2 0 obj <<>>stream\n" + new string('q', 2_000_000) + "\nendstream endobj\nxref\ntrailer<<>>\nstartxref\n123\n%%EOF\n";
+        return Encoding.ASCII.GetBytes(Build(Build(0).Length));
+    }
+
+    [Fact]
+    public void Fast_web_view_pdf_comes_out_whole()
+    {
+        var pdf = LinearizedPdf();
+        var (image, _) = BuildImage((pdf, FileKind.Pdf));
+        var dir = TempDir();
+        try { Assert.Equal(pdf.Length, Assert.Single(Carve(image, dir).Files).Length); }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void A_damaged_pdf_does_not_hide_the_next_one()
+    {
+        var damaged = Encoding.ASCII.GetBytes("%PDF-1.7\n1 0 obj <<>> endobj\n" + new string('a', 3000)); // its end was overwritten
+        var (image, files) = BuildImage((damaged, FileKind.Pdf), (Pdf(), FileKind.Pdf));
+        var dir = TempDir();
+        try
+        {
+            var got = Assert.Single(Carve(image, dir).Files);
+            Assert.Equal(files[1].Offset, got.Offset);
+            Assert.Equal(files[1].Data.Length, got.Length);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void Back_to_back_videos_come_out_as_two_files()
+    {
+        var a = Mp4();
+        var pad = (512 - a.Length % 512) % 512;
+        a = Box("ftyp", Encoding.ASCII.GetBytes("isom\0\0\0\0isom")).Concat(Box("moov", new byte[300]))
+            .Concat(Box("mdat", new byte[4000 + pad])).ToArray();                 // ends exactly on a sector
+        var b = Mp4();
+        var image = new byte[512 + a.Length + b.Length + 2048];
+        a.CopyTo(image, 512);
+        b.CopyTo(image, 512 + a.Length);
+        var dir = TempDir();
+        try
+        {
+            var r = Carve(image, dir);
+            Assert.Equal(new long[] { a.Length, b.Length }, r.Files.Select(f => f.Length).ToArray());
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void A_photo_ending_at_the_very_end_of_the_image_is_found()
+    {
+        var j = Jpeg();
+        var image = new byte[1024 + j.Length];
+        j.CopyTo(image, 1024);
+        var dir = TempDir();
+        try { Assert.Equal(j.Length, Assert.Single(Carve(image, dir).Files).Length); }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void Erased_flash_after_a_photo_header_is_rejected_quickly()
+    {
+        // Erased flash is all FF. A photo header followed by it must not be walked byte by byte.
+        var image = new byte[64 * 1024 * 1024];
+        var h = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, (byte)'J', (byte)'F', (byte)'I', (byte)'F', 0, 1, 1, 0, 0, 1, 0, 1, 0, 0 };
+        h.CopyTo(image, 0);
+        image.AsSpan(h.Length).Fill(0xFF);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Null(Formats.Jpeg(new ByteSource(new MemoryImageReader(image)), 0, new CarveOptions()));
+        Assert.True(sw.ElapsedMilliseconds < 1000);
+    }
+
     [Fact]
     public void Report_round_trips_and_states_the_limits()
     {

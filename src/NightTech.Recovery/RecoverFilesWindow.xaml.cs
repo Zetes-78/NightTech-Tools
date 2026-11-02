@@ -16,6 +16,7 @@ public partial class RecoverFilesWindow : Window
     private bool _outputTouched;
     private bool _settingOutput;
     private string? _lastOutput;
+    private bool _closing;
 
     public RecoverFilesWindow(string? imagePath, string? ticket, string? technician)
     {
@@ -156,7 +157,7 @@ public partial class RecoverFilesWindow : Window
             });
             _job = job;
             var done = await job;
-            Finished(done.Report, done.Text);
+            if (!_closing) Finished(done.Report, done.Text);
         }
         catch (Exception ex)
         {
@@ -233,9 +234,13 @@ public partial class RecoverFilesWindow : Window
     {
         if (_job is null || _cts is null) return;
         e.Cancel = true;
+        if (_closing) return;                       // already stopping; closes when the scan ends
         if (MessageBox.Show(this, "The scan is running. Stop it and close? Files found so far are kept.",
                 "Night Tech Recovery", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
+        if (_job is null || _cts is null) { e.Cancel = false; return; }   // finished while the question was open: just close
+        _closing = true;
+        PhaseText.Text = "Stopping...";
         _cts.Cancel();
         try { await _job; } catch { /* already logged */ }
         Closing -= Window_Closing;

@@ -50,15 +50,20 @@ internal static class Formats
         long limit = Math.Min(b.Length, start + o.MaxPhotoBytes);
         long pos = start + 2;
         bool sawFrame = false, sawScan = false;
-        while (pos + 4 <= limit)
+        while (pos + 2 <= limit)
         {
             if (b.Byte(pos) != 0xFF) return null;
-            while (b.Byte(pos + 1) == 0xFF) pos++; // fill bytes
+            // Fill bytes. Bounded: erased flash is all FF, and must not be walked byte by byte.
+            for (int fill = 0; pos + 2 < limit && b.Byte(pos + 1) == 0xFF; fill++)
+            {
+                if (fill > 4096) return null;
+                pos++;
+            }
             int m = b.Byte(pos + 1);
             if (m < 0) return null;
             if (m == 0xD9) return sawFrame && sawScan ? new Measured(FileKind.Jpeg, pos + 2 - start) : null;
             if (m is >= 0xD0 and <= 0xD7 or 0x01) { pos += 2; continue; }
-            if (m is 0x00 or 0xD8) return null;
+            if (m is 0x00 or 0xD8 || pos + 4 > limit) return null;
             int len = b.U16BE(pos + 2);
             if (len < 2) return null;
             if (m is >= 0xC0 and <= 0xCF and not 0xC4 and not 0xC8 and not 0xCC) sawFrame = true;
@@ -206,6 +211,7 @@ internal static class Formats
             if (!b.Bytes(pos + 4, type)) break;
             var t = Encoding.ASCII.GetString(type);
             if (!TopLevelBoxes.Contains(t)) break;              // the file ended at the previous box
+            if (t == "ftyp" && pos != start) break;             // the next file starts right here
             if (pos == start && t != "ftyp") return null;
             if (size == 1) size = b.U64BE(pos + 8);
             else if (size == 0) break;                          // "runs to the end": length unknown
@@ -229,22 +235,49 @@ internal static class Formats
         // Every PDF starts its first object within a few hundred bytes ("1 0 obj"); random data almost never does.
         if (b.Find(" obj"u8, start + 8, start + 4096) < 0) return null;
         long limit = Math.Min(b.Length, start + o.MaxDocumentBytes);
+        // Never run into the next PDF: a damaged PDF must not take the next one's ending (and hide it).
+        long next = b.Find("%PDF-"u8, start + 8, limit);
+        long bound = next >= 0 ? next : limit;
         ReadOnlySpan<byte> eof = "%%EOF"u8;
-        long hit = b.Find(eof, start, limit);
-        if (hit < 0) return null;
-        long end = hit + eof.Length;
+        long end;
+        bool exact = false;
+        // "Fast web view" PDFs have an early %%EOF after the first page's index; they state their whole length (/L).
+        long stated = LinearizedLength(b, start);
+        if (stated > 0 && start + stated <= bound && b.Find(eof, start + stated - 1024, start + stated) >= 0)
+        {
+            end = start + stated;
+            exact = true;
+        }
+        else
+        {
+            long hit = b.Find(eof, start, bound);
+            if (hit < 0) return null;
+            end = hit + eof.Length;
+        }
         // Edited PDFs add updates, each ending with its own %%EOF: keep going while another one follows closely.
         while (true)
         {
-            long more = b.Find(eof, end, Math.Min(limit, end + o.PdfUpdateWindow));
+            long more = b.Find(eof, end, Math.Min(bound, end + o.PdfUpdateWindow));
             if (more < 0) break;
-            long nextPdf = b.Find("%PDF-"u8, end, more);
-            if (nextPdf >= 0) break; // that %%EOF belongs to a different PDF
             end = more + eof.Length;
+            exact = false;
         }
-        if (b.Byte(end) == '\r') end++;
-        if (b.Byte(end) == '\n') end++;
+        if (!exact && b.Byte(end) == '\r') end++;
+        if (!exact && b.Byte(end) == '\n') end++;
         return new Measured(FileKind.Pdf, end - start);
+    }
+
+    /// <summary>The file length a linearized PDF states in its first object ("/Linearized 1 /L 123456"), or 0.</summary>
+    private static long LinearizedLength(ByteSource b, long start)
+    {
+        var head = new byte[1024];
+        int n = b.Read(start, head);
+        if (n <= 0) return 0;
+        var text = Encoding.ASCII.GetString(head, 0, n);
+        int lin = text.IndexOf("/Linearized", StringComparison.Ordinal);
+        if (lin < 0) return 0;
+        var m = System.Text.RegularExpressions.Regex.Match(text[lin..], @"/L\s+(\d{1,15})\b");
+        return m.Success && long.TryParse(m.Groups[1].Value, out var len) && len > 1024 ? len : 0;
     }
 
     // ---------------- ZIP, Word, Excel, PowerPoint ----------------

@@ -140,7 +140,7 @@ public static class Carver
                     if (m is not { } found || !o.Wants(found.Kind) || found.Length < Math.Min(o.MinBytes, 64)) continue;
                     if (found.Length < o.MinBytes && found.Kind is FileKind.Jpeg or FileKind.Png or FileKind.Gif or FileKind.Bmp) continue;
 
-                    var rel = Save(image, at, found, outputFolder);
+                    var rel = Save(image, at, found, outputFolder, cancel);
                     report.Files.Add(new CarvedFile(at, found.Length, found.Kind, rel));
                     report.BytesRecovered += found.Length;
                     var key = Formats.Extension(found.Kind).ToUpperInvariant();
@@ -180,25 +180,41 @@ public static class Carver
         return report;
     }
 
-    /// <summary>Writes one found file: &lt;Category&gt;\&lt;ext&gt;-&lt;sector&gt;.&lt;ext&gt;, named by where it was on the drive.</summary>
-    private static string Save(IImageReader image, long offset, Measured m, string root)
+    /// <summary>
+    /// Writes one found file: &lt;Category&gt;\&lt;ext&gt;-&lt;sector&gt;.&lt;ext&gt;, named by where it was on the drive. It is written
+    /// as .partial and renamed when complete, so a stop or a full disk never leaves a cut-off file looking finished.
+    /// </summary>
+    private static string Save(IImageReader image, long offset, Measured m, string root, CancellationToken cancel)
     {
         var ext = Formats.Extension(m.Kind);
         var rel = Path.Combine(Formats.Category(m.Kind), $"{ext}-{offset / 512:D10}.{ext}");
         var path = Path.Combine(root, rel);
+        var partial = path + ".partial";
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        using var outFile = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024);
-        var buf = new byte[1024 * 1024];
-        long done = 0;
-        while (done < m.Length)
+        try
         {
-            int want = (int)Math.Min(buf.Length, m.Length - done);
-            int n = image.Read(offset + done, buf.AsSpan(0, want));
-            if (n <= 0) throw new IOException($"Couldn't read the image at byte {offset + done:N0}.");
-            outFile.Write(buf, 0, n);
-            done += n;
+            using (var outFile = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024))
+            {
+                var buf = new byte[1024 * 1024];
+                long done = 0;
+                while (done < m.Length)
+                {
+                    cancel.ThrowIfCancellationRequested();
+                    int want = (int)Math.Min(buf.Length, m.Length - done);
+                    int n = image.Read(offset + done, buf.AsSpan(0, want));
+                    if (n <= 0) throw new IOException($"Couldn't read the image at byte {offset + done:N0}.");
+                    outFile.Write(buf, 0, n);
+                    done += n;
+                }
+            }
+            File.Move(partial, path, overwrite: true);
+            return rel;
         }
-        return rel;
+        catch
+        {
+            try { File.Delete(partial); } catch { /* best effort */ }
+            throw;
+        }
     }
 
     /// <summary>Saves report.json (for Night Tech Hub) and report.txt next to the recovered files.</summary>
