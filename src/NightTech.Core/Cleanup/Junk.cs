@@ -37,7 +37,7 @@ public static class Junk
     public static readonly IReadOnlyList<JunkCategory> Categories = new[]
     {
         new JunkCategory("user-temp", "Temporary files (each person)", "Leftovers programs put in each person's Temp folder. Only files older than a day.", true),
-        new JunkCategory("windows-temp", "Windows temporary files", "Windows' own Temp folder. Only files older than a day.", true),
+        new JunkCategory("windows-temp", "Windows temporary files", "Windows' own Temp folder. Only files older than a week, and skipped while an update or install is waiting for a restart.", true),
         new JunkCategory("update-cache", "Windows Update downloads", "Update files that are already installed. Windows downloads again anything it still needs.", true),
         new JunkCategory("delivery-opt", "Delivery Optimization cache", "Update pieces Windows keeps to share with other PCs.", true),
         new JunkCategory("error-reports", "Error reports", "Copies of crash reports already sent (or not needed).", true),
@@ -53,11 +53,12 @@ public static class Junk
     /// <summary>The same idea on a Mac.</summary>
     public static readonly IReadOnlyList<JunkCategory> MacCategories = new[]
     {
-        new JunkCategory("mac-user-cache", "App caches (each person)", "Files apps keep to load faster; they rebuild them as needed. Only files older than a day.", true),
+        new JunkCategory("mac-user-cache", "App caches (each person)", "Files apps keep to load faster; they rebuild them as needed. Only files older than a day. macOS's own caches (iCloud, Photos, Mail and so on) are left alone.", true,
+            "Quit the customer's apps first: a Mac lets an open app's files be removed while it's using them."),
         new JunkCategory("mac-user-logs", "App logs (each person)", "Old log files apps have written.", true),
         new JunkCategory("mac-system-logs", "System logs and crash reports", "Old diagnostic logs and crash reports.", true),
         new JunkCategory("mac-browser-cache", "Browser caches", "Saved copies of web pages in Safari, Chrome, Edge, Brave and Firefox. Passwords, history, bookmarks and sign-ins are NOT touched.", true,
-            "Close the browsers first, or their busy files are skipped."),
+            "Quit the browsers first (Cmd+Q)."),
         new JunkCategory("mac-xcode", "Xcode build leftovers", "Developer build files (DerivedData). Only on Macs used for app development.", true),
         new JunkCategory("mac-trash", "Trash", "Empties each person's Trash.", false,
             "Ask the customer first: anything in the Trash is gone for good."),
@@ -75,8 +76,8 @@ public static class Junk
         foreach (var home in homes)
         {
             var lib = P(home, "Library");
-            // Browser caches are their own category, so they aren't counted twice.
-            L.Add(new("mac-user-cache", P(lib, "Caches"), MinAgeHours: 24, Exclude: new[] { "com.apple.Safari", "Google", "Microsoft Edge", "BraveSoftware", "Firefox" }));
+            // Browser caches are their own category; macOS's own caches (iCloud, CloudKit, Photos, Mail, background downloads) are never touched.
+            L.Add(new("mac-user-cache", P(lib, "Caches"), MinAgeHours: 24, Exclude: new[] { "com.apple.*", "CloudKit", "FamilyCircle", "Google", "Microsoft Edge", "BraveSoftware", "Firefox" }));
             L.Add(new("mac-user-logs", P(lib, "Logs"), MinAgeHours: 24 * 3));
             L.Add(new("mac-browser-cache", P(lib, "Caches", "com.apple.Safari")));
             L.Add(new("mac-browser-cache", P(lib, "Caches", "Google", "Chrome")));
@@ -96,7 +97,7 @@ public static class Junk
     {
         var L = new List<JunkLocation>
         {
-            new("windows-temp", P(windowsDir, "Temp"), MinAgeHours: 24),
+            new("windows-temp", P(windowsDir, "Temp"), MinAgeHours: 24 * 7),
             new("update-cache", P(windowsDir, "SoftwareDistribution", "Download")),
             new("delivery-opt", P(windowsDir, "ServiceProfiles", "NetworkService", "AppData", "Local", "Microsoft", "Windows", "DeliveryOptimization", "Cache")),
             new("error-reports", P(programData, "Microsoft", "Windows", "WER", "ReportArchive")),
@@ -150,12 +151,12 @@ public static class Junk
         int star = Array.IndexOf(parts, "*");
         if (star < 0)
         {
-            if (Directory.Exists(path) && !IsLink(path)) yield return path;
+            if (Directory.Exists(path) && !HasLinkOnPath(path)) yield return path;
             yield break;
         }
         var head = string.Join(System.IO.Path.DirectorySeparatorChar, parts[..star]);
         if (head.Length == 0) head = System.IO.Path.DirectorySeparatorChar.ToString();
-        if (!Directory.Exists(head) || IsLink(head)) yield break;
+        if (!Directory.Exists(head) || HasLinkOnPath(head)) yield break;
         string[] subs;
         try { subs = Directory.GetDirectories(head); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { yield break; }
         var tail = parts[(star + 1)..];
@@ -166,6 +167,45 @@ public static class Junk
         }
     }
 
+    /// <summary>
+    /// True when the path, or any folder above it, is a link or junction (or can't be checked). Junk folders are only
+    /// cleaned when every step down to them is a real folder, so a planted link can't point the cleanup somewhere else.
+    /// </summary>
+    public static bool HasLinkOnPath(string path)
+    {
+        string? p;
+        try { p = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(path)); }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return true; }
+        while (!string.IsNullOrEmpty(p))
+        {
+            var parent = System.IO.Path.GetDirectoryName(p);
+            if (parent is null) break; // the drive or "/" itself
+            if (IsLink(p)) return true;
+            p = parent;
+        }
+        return false;
+    }
+
+    private static bool Excluded(string name, string[]? exclude) =>
+        exclude is not null && exclude.Any(x => x.EndsWith('*') ? name.StartsWith(x[..^1], StringComparison.OrdinalIgnoreCase) : name.Equals(x, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>A database and its -wal/-shm/-journal companions are kept or removed together: never half of one.</summary>
+    private static readonly string[] Companions = { "-wal", "-shm", "-journal" };
+
+    private static bool GroupTooNew(FileInfo f, DateTime now, double minAgeHours)
+    {
+        var name = f.Name;
+        var b = Companions.FirstOrDefault(c => name.EndsWith(c, StringComparison.OrdinalIgnoreCase)) is { } c0 ? name[..^c0.Length] : name;
+        var dir = f.DirectoryName ?? "";
+        foreach (var n in Companions.Select(c => b + c).Append(b))
+        {
+            if (n.Equals(name, StringComparison.OrdinalIgnoreCase)) continue;
+            var o = new FileInfo(System.IO.Path.Combine(dir, n));
+            if (o.Exists && (now - Newest(o)).TotalHours < minAgeHours) return true;
+        }
+        return false;
+    }
+
     public static bool IsLink(string path)
     {
         try { return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0; }
@@ -173,7 +213,10 @@ public static class Junk
     }
 
     /// <summary>Files a location would remove. Never steps into links or junctions.</summary>
-    public static IEnumerable<FileInfo> Files(JunkLocation loc, DateTime now, IEnumerable<string> userProfiles)
+    public static IEnumerable<FileInfo> Files(JunkLocation loc, DateTime now, IEnumerable<string> userProfiles) =>
+        Walk(loc, now, userProfiles).Select(x => x.File);
+
+    private static IEnumerable<(string Root, FileInfo File)> Walk(JunkLocation loc, DateTime now, IEnumerable<string> userProfiles)
     {
         var profiles = userProfiles.ToList();
         foreach (var root in Expand(loc.Path))
@@ -198,15 +241,15 @@ public static class Junk
                     {
                         fi = new FileInfo(f);
                         if ((fi.Attributes & FileAttributes.ReparsePoint) != 0) continue;
-                        if (loc.MinAgeHours > 0 && (now - Newest(fi)).TotalHours < loc.MinAgeHours) continue;
+                        if (loc.MinAgeHours > 0 && ((now - Newest(fi)).TotalHours < loc.MinAgeHours || GroupTooNew(fi, now, loc.MinAgeHours))) continue;
                     }
                     catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
-                    yield return fi;
+                    yield return (root, fi);
                 }
                 foreach (var d in dirs)
                 {
                     if (IsLink(d)) continue;
-                    if (dir == root && loc.Exclude is { } ex && ex.Contains(System.IO.Path.GetFileName(d), StringComparer.OrdinalIgnoreCase)) continue;
+                    if (dir == root && Excluded(System.IO.Path.GetFileName(d), loc.Exclude)) continue;
                     stack.Push(d);
                 }
             }
@@ -230,18 +273,26 @@ public static class Junk
         return r;
     }
 
-    /// <summary>Removes the files, then any folders left empty inside the location (never the location itself).</summary>
+    /// <summary>
+    /// Removes the files, then any folders left empty inside the location (never the location itself). Files are
+    /// removed as the walk goes, and just before each one the whole path is checked again, so a folder swapped for a
+    /// link after it was listed is skipped rather than followed.
+    /// </summary>
     public static JunkCleanResult Clean(JunkCategory cat, IEnumerable<JunkLocation> locations, DateTime now, IReadOnlyList<string> profiles, CancellationToken ct = default)
     {
         var r = new JunkCleanResult { CategoryId = cat.Id, Name = cat.Name };
         foreach (var loc in locations.Where(l => l.CategoryId == cat.Id))
         {
-            foreach (var f in Files(loc, now, profiles).ToList())
+            foreach (var (root, f) in Walk(loc, now, profiles))
             {
                 ct.ThrowIfCancellationRequested();
                 long size = 0;
                 try
                 {
+                    f.Refresh();
+                    var dir = f.DirectoryName ?? "";
+                    if (!f.Exists || (f.Attributes & FileAttributes.ReparsePoint) != 0 || HasLinkOnPath(dir) || !IsInside(dir, root))
+                    { r.FilesSkipped++; continue; }
                     size = f.Length;
                     if (f.IsReadOnly) f.IsReadOnly = false;
                     f.Delete();
@@ -257,6 +308,12 @@ public static class Junk
         return r;
     }
 
+    private static bool IsInside(string dir, string root)
+    {
+        var d = Normalize(dir); var rt = Normalize(root);
+        return d.Equals(rt, StringComparison.OrdinalIgnoreCase) || d.StartsWith(rt + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void RemoveEmpty(string dir, bool isRoot, string[]? exclude = null)
     {
         try
@@ -264,10 +321,10 @@ public static class Junk
             foreach (var d in Directory.GetDirectories(dir))
             {
                 if (IsLink(d)) continue;
-                if (isRoot && exclude is not null && exclude.Contains(System.IO.Path.GetFileName(d), StringComparer.OrdinalIgnoreCase)) continue;
+                if (isRoot && Excluded(System.IO.Path.GetFileName(d), exclude)) continue;
                 RemoveEmpty(d, false);
             }
-            if (!isRoot && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+            if (!isRoot && !HasLinkOnPath(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }

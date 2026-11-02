@@ -148,6 +148,7 @@ public class CleanupTests
     [InlineData("C:\\Program Files\\Some App\\app.exe --tray", "C:\\Program Files\\Some App\\app.exe")]
     [InlineData("C:\\Windows\\system32\\rundll32.exe C:\\Program Files\\X\\x.dll,Start", "C:\\Program Files\\X\\x.dll")]
     [InlineData("notepad", "notepad")]
+    [InlineData("C:\\my.company\\app\\uninstall.exe /S", "C:\\my.company\\app\\uninstall.exe")]
     public void Startup_commands_resolve_to_their_program(string command, string exe) =>
         Assert.Equal(exe, Startup.ExecutablePath(command));
 
@@ -159,7 +160,7 @@ public class CleanupTests
         Assert.Equal(StartupAdvice.Keep, I("RtkAudUService", "C:\\Windows\\System32\\RtkAudUService64.exe").Advice);
         Assert.Equal(StartupAdvice.TurnOff, I("Steam", "\"C:\\Program Files (x86)\\Steam\\steam.exe\" -silent").Advice);
         Assert.Equal(StartupAdvice.TurnOff, I("Wave Browser", "C:\\Users\\a\\AppData\\Local\\WaveBrowser\\wavebrowser.exe").Advice);
-        Assert.Equal(StartupAdvice.TurnOff, I("Acme Updater", "C:\\Acme\\update.exe").Advice);
+        Assert.Equal(StartupAdvice.Optional, I("Acme Updater", "C:\\Acme\\update.exe").Advice);   // never switched off automatically
         Assert.Equal(StartupAdvice.Unknown, I("xq7731", "C:\\Users\\a\\AppData\\Roaming\\xq7731.exe").Advice);
     }
 
@@ -227,5 +228,81 @@ public class CleanupTests
             Assert.Contains("measured at next restart", h);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void Advice_matches_whole_words_and_never_turns_off_security_software()
+    {
+        StartupItem I(string name, string cmd = "", string pub = "") { var i = new StartupItem { Name = name, Command = cmd, Publisher = pub }; Startup.Advise(i); return i; }
+        Assert.Equal(StartupAdvice.Keep, I("Sophos AutoUpdate", "C:\\Program Files\\Sophos\\AutoUpdate\\update.exe").Advice);
+        Assert.Equal(StartupAdvice.Keep, I("TrendMicro Update").Advice);
+        Assert.NotEqual(StartupAdvice.TurnOff, I("KnowledgeBase", "C:\\KB\\kb.exe").Advice);
+        Assert.NotEqual(StartupAdvice.TurnOff, I("NicholasBackup", "C:\\NB\\nb.exe").Advice);
+        Assert.NotEqual(StartupAdvice.TurnOff, I("Original Prusa", "C:\\Prusa\\prusa.exe").Advice);
+        Assert.NotEqual(StartupAdvice.Keep, I("ResetHelper", "C:\\R\\reset.exe").Advice);
+        Assert.NotEqual(StartupAdvice.Keep, I("Widget", "C:\\Program Files\\amd64\\widget.exe").Advice); // folder names don't count
+        Assert.Equal(StartupAdvice.TurnOff, I("MicrosoftEdgeAutoLaunch_123", "\"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\" --no-startup-window").Advice);
+        Assert.Equal(StartupAdvice.TurnOff, I("Origin", "C:\\Origin\\Origin.exe").Advice);
+        Assert.Null(Programs.Flag("NicholasBackup", ""));
+        Assert.Equal(FlagLevel.Review, Programs.Flag("Disney+", "")!.Level);
+        Assert.Equal(FlagLevel.Unwanted, Programs.Flag("PCKeeper", "")!.Level);
+    }
+
+    [Fact]
+    public void A_link_higher_up_the_path_stops_the_cleanup()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var root = Temp();
+        try
+        {
+            var other = Path.Combine(root, "other");
+            var victim = Make(Path.Combine(other, "Logs", "keep.log"), 100, 1000);
+            var home = Path.Combine(root, "ann");
+            Directory.CreateDirectory(home);
+            Directory.CreateSymbolicLink(Path.Combine(home, "Library"), other);   // ~/Library is a link
+            var locs = Junk.MacLocations(new[] { home });
+            var r = Junk.Clean(Junk.Category("mac-user-logs"), locs, Now, new[] { home });
+            Assert.Equal(0, r.FilesRemoved);
+            Assert.True(File.Exists(victim));
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
+    [Fact]
+    public void Mac_system_caches_and_half_databases_are_left_alone()
+    {
+        var root = Temp();
+        try
+        {
+            var home = Path.Combine(root, "ann");
+            var caches = Path.Combine(home, "Library", "Caches");
+            var icloud = Make(Path.Combine(caches, "com.apple.bird", "x.db"), 100, 1000);
+            var kit = Make(Path.Combine(caches, "CloudKit", "y"), 100, 1000);
+            var db = Make(Path.Combine(caches, "com.example.app", "Cache.db"), 100, 1000);
+            var wal = Make(Path.Combine(caches, "com.example.app", "Cache.db-wal"), 100, 1);   // in use: keep the pair
+            var junk = Make(Path.Combine(caches, "com.example.app", "old.bin"), 100, 1000);
+            var r = Junk.Clean(Junk.Category("mac-user-cache"), Junk.MacLocations(new[] { home }), Now, new[] { home });
+            Assert.True(File.Exists(icloud));
+            Assert.True(File.Exists(kit));
+            Assert.True(File.Exists(db));
+            Assert.True(File.Exists(wal));
+            Assert.False(File.Exists(junk));
+            Assert.Equal(1, r.FilesRemoved);
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
+    [Theory]
+    [InlineData("\"C:\\Program Files\\App\\unins000.exe\" /SILENT", "C:\\Program Files\\App\\unins000.exe", "/SILENT")]
+    [InlineData("C:\\Program Files\\App Two\\uninstall.exe /S", "C:\\Program Files\\App Two\\uninstall.exe", "/S")]
+    [InlineData("C:\\my.company\\app\\uninstall.exe /S", "C:\\my.company\\app\\uninstall.exe", "/S")]
+    [InlineData("rundll32.exe C:\\Windows\\x.dll,Uninstall /q", "rundll32.exe", "C:\\Windows\\x.dll,Uninstall /q")]
+    [InlineData("RunDll32 C:\\PROGRA~2\\COMMON~1\\INSTAL~1\\PROFES~1\\RunTime\\11\\50\\Intel32\\Ctor.dll,LaunchSetup \"C:\\x\\setup.exe\" -removeonly", "RunDll32", "C:\\PROGRA~2\\COMMON~1\\INSTAL~1\\PROFES~1\\RunTime\\11\\50\\Intel32\\Ctor.dll,LaunchSetup \"C:\\x\\setup.exe\" -removeonly")]
+    [InlineData("MsiExec.exe /I{1234}", "MsiExec.exe", "/I{1234}")]
+    public void Uninstall_commands_split_into_program_and_arguments(string command, string file, string args)
+    {
+        var (f, a) = Startup.SplitCommand(command);
+        Assert.Equal(file, f);
+        Assert.Equal(args, a);
     }
 }

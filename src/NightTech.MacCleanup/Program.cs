@@ -43,7 +43,7 @@ if (!Sh.IsRoot)
     Bad("Without it, only this account's junk can be cleared and some checks are skipped.");
 }
 Console.WriteLine("\nTip: give Terminal \"Full Disk Access\" (System Settings > Privacy & Security) so browser caches can be cleared.");
-report.Computer = Sh.Text("/usr/sbin/scutil", "--get ComputerName") is { Length: > 0 } cn ? cn : Environment.MachineName;
+report.Computer = Sh.Text("/usr/sbin/scutil", "--get", "ComputerName") is { Length: > 0 } cn ? cn : Environment.MachineName;
 report.Customer = Ask("\nCustomer name");
 report.Ticket = Ask("Hub ticket #");
 report.Technician = Ask("Technician", sudoUser ?? Environment.UserName);
@@ -90,7 +90,7 @@ void Measure(bool after)
 void Quick()
 {
     Title("Quick cleanup");
-    Console.WriteLine("Ask the customer to save their work. Browsers should be closed so their caches can be cleared.");
+    Console.WriteLine("Ask the customer to save their work, then QUIT their apps and browsers (Cmd+Q). A Mac lets an open app's files be removed while it's using them, so clean with apps closed.");
     if (!YesNo("Start", true)) return;
     if (report.Before is null) Measure(false);
     Console.WriteLine("Scanning for junk...");
@@ -102,7 +102,7 @@ void Quick()
     {
         Title("Suggested background items to turn off");
         foreach (var a in off) Console.WriteLine($"  - {a.Label}  ({a.Scope}){(a.Signer.Length > 0 ? " · " + a.Signer : "")}\n      {a.Why}");
-        if (YesNo($"Turn off these {off.Count}", true)) foreach (var a in off) DisableAgent(a);
+        if (YesNo($"Turn off these {off.Count}? Check the list with the customer first", false)) foreach (var a in off) DisableAgent(a);
     }
     SecurityChecks(checkUpdates: true);
     var dns = Machine.FlushDns();
@@ -171,7 +171,7 @@ void AgentsMenu()
     {
         var n = Agents.RestoreAll();
         report.Tasks.RemoveAll(t => t.Area == "Startup");
-        Good($"Put back {n} item(s). They start again at the next sign-in or restart.");
+        Good($"Put back {n} item(s). Anything that didn't start right away starts at the next sign-in or restart.");
         agents = Agents.Read(homes);
         return;
     }
@@ -260,8 +260,8 @@ void Finish()
     report.Notes = Ask("Notes for the customer (optional)");
     report.Finished = DateTime.Now;
     var (json, text, html) = report.Save(reportsFolder);
-    if (sudoUser is { Length: > 0 }) Sh.Exec("/usr/sbin/chown", $"-R \"{sudoUser}\" \"{reportsFolder}\"", 20);
+    if (sudoUser is { Length: > 0 }) Sh.Exec("/usr/sbin/chown", new[] { "-R", "-P", sudoUser, reportsFolder }, 20);
     lastReport = html;
     Good($"\nSaved: {html}\nFor the Hub ticket: {Path.GetFileName(json)}");
-    Sh.Exec("/usr/bin/open", $"\"{html}\"", 20);
+    Sh.Exec("/usr/bin/open", new[] { html }, 20);
 }

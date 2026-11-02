@@ -123,8 +123,9 @@ public static class Programs
     public static ProgramFlag? Flag(string name, string publisher)
     {
         if (NeverFlag.Any(n => name.Contains(n, StringComparison.OrdinalIgnoreCase))) return null;
+        var words = Words.Of(name);
         foreach (var (m, level, why) in Rules)
-            if (name.Contains(m, StringComparison.OrdinalIgnoreCase)) return new ProgramFlag(level, why);
+            if (Words.Has(words, m)) return new ProgramFlag(level, why);
         return null;
     }
 

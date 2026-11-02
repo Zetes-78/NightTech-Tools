@@ -62,12 +62,24 @@ public sealed class CleanupReport
 
     public long BytesFreed => Junk.Sum(j => j.BytesFreed);
 
-    public List<string> Limitations { get; set; } = new()
+    /// <summary>Extra notes for the "Please note" list (the standard ones come from <see cref="Notices"/>).</summary>
+    public List<string> Limitations { get; set; } = new();
+
+    /// <summary>The "Please note" list, written for what was actually done on this computer.</summary>
+    public List<string> Notices()
     {
-        "This report documents the work performed on the date shown. It is not a guarantee of speed or that the computer is free of every problem.",
-        "Your documents, photos, passwords, browser history and bookmarks were not deleted.",
-        "Startup programs that were turned off can be turned back on at any time (Task Manager > Startup apps on Windows; System Settings > General > Login Items on a Mac).",
-    };
+        var list = new List<string> { "This report documents the work performed on the date shown. It is not a guarantee of speed or that the computer is free of every problem." };
+        var emptied = Junk.FirstOrDefault(j => j.CategoryId is "recycle-bin" or "mac-trash" && j.BytesFreed > 0);
+        list.Add(emptied is null
+            ? "Your documents, photos, passwords, browser history and bookmarks were not deleted."
+            : $"Your documents, photos, passwords, browser history and bookmarks were not deleted, apart from what was in the {(emptied.CategoryId == "mac-trash" ? "Trash" : "Recycle Bin")}, which was emptied with your agreement.");
+        if (Tasks.Any(t => t.Area == "Startup" && t.Result == ItemResult.Done && t.What.StartsWith("Turned off ", StringComparison.Ordinal)))
+            list.Add(Platform == "macOS"
+                ? "Background items that were turned off were set aside, not deleted. We can put them back at any time."
+                : "Startup programs that were turned off can be turned back on at any time (Task Manager > Startup apps).");
+        list.AddRange(Limitations);
+        return list;
+    }
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -125,7 +137,7 @@ public sealed class CleanupReport
         if (Threats.Count > 0)
         {
             s.AppendLine();
-            s.AppendLine("THREATS FOUND AND REMOVED BY THE SECURITY SCAN");
+            s.AppendLine("THREATS FOUND BY THE SECURITY SCAN (and what was done about each)");
             foreach (var t in Threats) s.AppendLine("  - " + t);
         }
         if (Findings.Count > 0)
@@ -143,7 +155,7 @@ public sealed class CleanupReport
         if (!string.IsNullOrWhiteSpace(Notes)) { s.AppendLine(); s.AppendLine("NOTES"); s.AppendLine("  " + Notes.Trim()); }
         s.AppendLine();
         s.AppendLine("PLEASE NOTE");
-        foreach (var l in Limitations) s.AppendLine("  - " + l);
+        foreach (var l in Notices()) s.AppendLine("  - " + l);
         s.AppendLine();
         s.AppendLine($"{Brand.Company} · {Brand.Phone} · {Brand.Website}");
         return s.ToString();
@@ -184,10 +196,10 @@ public sealed class CleanupReport
         h.Append($"<header><div><h1>{E(Brand.Company)}</h1><div class=\"muted\">{E(Platform == "macOS" ? "Mac" : "PC")} cleanup report · {E(Finished.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture))}</div></div>");
         h.Append($"<div class=\"muted\" style=\"text-align:right\">{E(Customer)}<br>{E(Computer)}{(Ticket.Length > 0 ? "<br>Ticket " + E(Ticket) : "")}</div></header>");
         h.Append($"<p><span class=\"big\">{E(Format.Bytes(BytesFreed))}</span> of junk removed");
-        var startup = Tasks.Count(t => t.Area == "Startup" && t.Result == ItemResult.Done);
+        var startup = Tasks.Count(t => t.Area == "Startup" && t.Result == ItemResult.Done && t.What.StartsWith("Turned off ", StringComparison.Ordinal));
         if (startup > 0) h.Append($", <strong>{startup}</strong> startup program{(startup == 1 ? "" : "s")} turned off");
         var removed = Tasks.Count(t => t.Area == "Programs" && t.Result == ItemResult.Done);
-        if (removed > 0) h.Append($", <strong>{removed}</strong> unwanted program{(removed == 1 ? "" : "s")} removed");
+        if (removed > 0) h.Append($", <strong>{removed}</strong> program{(removed == 1 ? "" : "s")} removed");
         h.Append(".</p>");
         if (RestorePoint) h.Append("<p class=\"muted\">A restore point was created before any change.</p>");
 
@@ -207,12 +219,12 @@ public sealed class CleanupReport
             h.Append($"<tr><td><span class=\"{cls}\">{mark}</span></td><td>{E(t.What)}</td><td>{E(t.Detail)}</td></tr>");
         }
         h.Append("</table>");
-        if (Threats.Count > 0) { h.Append("<h2>Threats found and removed</h2><ul>"); foreach (var t in Threats) h.Append($"<li>{E(t)}</li>"); h.Append("</ul>"); }
+        if (Threats.Count > 0) { h.Append("<h2>Threats found by the security scan</h2><ul>"); foreach (var t in Threats) h.Append($"<li>{E(t)}</li>"); h.Append("</ul>"); }
         if (Findings.Count > 0) { h.Append("<h2>Also found</h2><ul>"); foreach (var f in Findings) h.Append($"<li>{E(f)}</li>"); h.Append("</ul>"); }
         if (Recommendations.Count > 0) { h.Append("<h2>Recommendations</h2><ul>"); foreach (var r in Recommendations) h.Append($"<li>{E(r)}</li>"); h.Append("</ul>"); }
         if (!string.IsNullOrWhiteSpace(Notes)) h.Append($"<h2>Notes</h2><p>{E(Notes)}</p>");
         h.Append("<h2>Please note</h2><ul class=\"muted\">");
-        foreach (var l in Limitations) h.Append($"<li>{E(l)}</li>");
+        foreach (var l in Notices()) h.Append($"<li>{E(l)}</li>");
         h.Append("</ul>");
         h.Append($"<p class=\"muted\" style=\"margin-top:28px;text-align:center\">{E(Brand.Company)} · {E(Brand.Phone)} · {E(Brand.Website)}<br>Technician: {E(Technician)}</p>");
         h.Append("</main></body></html>");

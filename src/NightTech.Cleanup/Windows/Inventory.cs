@@ -122,13 +122,17 @@ public static class ProgramReader
         return list.GroupBy(p => p.Name).Select(g => g.First()).ToList();
     }
 
-    /// <summary>Program and arguments from an uninstall command. MsiExec /I (repair) becomes /X (remove).</summary>
+    /// <summary>Program and arguments from an uninstall command. MsiExec /I (repair) becomes /X (remove). Bare Windows tools run from System32.</summary>
     public static (string File, string Args) Split(string command)
     {
-        var exe = Startup.ExecutablePath(command);
-        var c = command.Trim();
-        string rest = c.StartsWith('"') ? c[(c.IndexOf('"', 1) + 1)..].Trim() : c.Length > exe.Length && c.StartsWith(exe, StringComparison.OrdinalIgnoreCase) ? c[exe.Length..].Trim() : "";
-        if (Path.GetFileName(exe).Equals("msiexec.exe", StringComparison.OrdinalIgnoreCase) || exe.Equals("MsiExec.exe", StringComparison.OrdinalIgnoreCase))
+        var (exe, rest) = Startup.SplitCommand(command);
+        if (!exe.Contains('\\'))
+        {
+            var withExt = Path.HasExtension(exe) ? exe : exe + ".exe";
+            foreach (var dir in new[] { Environment.SystemDirectory, Machine.WindowsDir })
+                if (File.Exists(Path.Combine(dir, withExt))) { exe = Path.Combine(dir, withExt); break; }
+        }
+        if (Path.GetFileName(exe).Equals("msiexec.exe", StringComparison.OrdinalIgnoreCase))
         {
             exe = Proc.Sys("msiexec.exe");
             rest = System.Text.RegularExpressions.Regex.Replace(rest, @"/I\s*(\{)", "/X$1", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
@@ -145,7 +149,8 @@ public static class ProgramReader
             return r.ExitCode;
         }
         var (file, args) = Split(p.UninstallCommand);
-        using var proc = Process.Start(new ProcessStartInfo(file, args) { UseShellExecute = true });
+        if (!Path.IsPathRooted(file) || !File.Exists(file)) throw new FileNotFoundException("The uninstaller isn't there: " + file);
+        using var proc = Process.Start(new ProcessStartInfo(file, args) { UseShellExecute = false });
         if (proc is null) return -1;
         var sw = Stopwatch.StartNew();
         while (!proc.WaitForExit(1000))

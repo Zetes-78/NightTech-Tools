@@ -12,10 +12,12 @@ public sealed record Run(int Code, string Out);
 /// <summary>macOS's own command-line tools, always by full path.</summary>
 public static class Sh
 {
-    public static Run Exec(string file, string args, int timeoutSeconds = 120, string? stdin = null)
+    /// <summary>Runs a tool with each argument passed separately (never through a shell, never re-split), so a file name can't add options.</summary>
+    public static Run Exec(string file, string[] args, int timeoutSeconds = 120, string? stdin = null)
     {
         if (!File.Exists(file)) return new Run(-2, $"{file} isn't on this Mac.");
-        var psi = new ProcessStartInfo(file, args) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = stdin is not null };
+        var psi = new ProcessStartInfo(file) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = stdin is not null };
+        foreach (var a in args) psi.ArgumentList.Add(a);
         using var p = Process.Start(psi)!;
         var sb = new StringBuilder();
         p.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (sb) sb.AppendLine(e.Data); };
@@ -29,7 +31,7 @@ public static class Sh
     }
 
     /// <summary>A command's printed text, trimmed ("" if it failed).</summary>
-    public static string Text(string file, string args, int timeoutSeconds = 60) { var r = Exec(file, args, timeoutSeconds); return r.Code == 0 ? r.Out.Trim() : ""; }
+    public static string Text(string file, params string[] args) { var r = Exec(file, args, 60); return r.Code == 0 ? r.Out.Trim() : ""; }
 
     [DllImport("libc")] private static extern uint geteuid();
     public static bool IsRoot => OperatingSystem.IsMacOS() || OperatingSystem.IsLinux() ? geteuid() == 0 : false;
@@ -64,20 +66,20 @@ public static class Machine
         return $"{(name.Length > 0 ? name : "macOS")} {ver}".Trim();
     }
 
-    public static string Model() => Sh.Text("/usr/sbin/sysctl", "-n hw.model");
-    public static string Chip() { var c = Sh.Text("/usr/sbin/sysctl", "-n machdep.cpu.brand_string"); return c.Length > 0 ? c : RuntimeInformation.OSArchitecture.ToString(); }
+    public static string Model() => Sh.Text("/usr/sbin/sysctl", "-n", "hw.model");
+    public static string Chip() { var c = Sh.Text("/usr/sbin/sysctl", "-n", "machdep.cpu.brand_string"); return c.Length > 0 ? c : RuntimeInformation.OSArchitecture.ToString(); }
 
     public static Snapshot Measure(int loginItemsOn)
     {
         var s = new Snapshot { Taken = DateTime.Now, StartupItemsOn = loginItemsOn, System = MacOS() };
         try { var d = new DriveInfo("/System/Volumes/Data"); s.FreeBytes = d.AvailableFreeSpace; s.TotalBytes = d.TotalSize; }
         catch (Exception e) when (e is IOException or ArgumentException) { try { var d = new DriveInfo("/"); s.FreeBytes = d.AvailableFreeSpace; s.TotalBytes = d.TotalSize; } catch (IOException) { } }
-        if (long.TryParse(Sh.Text("/usr/sbin/sysctl", "-n hw.memsize"), out var mem)) s.RamGb = Math.Round(mem / 1073741824.0, 1);
-        s.Processes = Sh.Text("/bin/ps", "-A -o pid=").Split('\n', StringSplitOptions.RemoveEmptyEntries).Length;
+        if (long.TryParse(Sh.Text("/usr/sbin/sysctl", "-n", "hw.memsize"), out var mem)) s.RamGb = Math.Round(mem / 1073741824.0, 1);
+        s.Processes = Sh.Text("/bin/ps", "-A", "-o", "pid=").Split('\n', StringSplitOptions.RemoveEmptyEntries).Length;
         var mp = Sh.Text("/usr/bin/memory_pressure", "-Q");
         var m = System.Text.RegularExpressions.Regex.Match(mp, @"free percentage:\s*(\d+)%");
         if (m.Success) s.MemoryUsedPercent = 100 - int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
-        var info = Sh.Text("/usr/sbin/diskutil", "info /");
+        var info = Sh.Text("/usr/sbin/diskutil", "info", "/");
         s.DriveKind = info.Contains("Solid State:               Yes", StringComparison.Ordinal) || info.Contains("Solid State: Yes", StringComparison.Ordinal) ? "SSD"
                     : info.Contains("Solid State:               No", StringComparison.Ordinal) ? "HDD" : "";
         s.Protection = Sh.Text("/usr/sbin/spctl", "--status").Contains("enabled", StringComparison.OrdinalIgnoreCase);
@@ -101,11 +103,11 @@ public static class Machine
         list.Add(new("Firewall", fw.Contains("enabled") ? true : fw.Contains("disabled") ? false : null, fw.Length > 0 ? fw : "couldn't check"));
         var tm = Sh.Text("/usr/bin/tmutil", "latestbackup");
         list.Add(new("Time Machine backup", tm.Length > 0 ? true : false, tm.Length > 0 ? "latest: " + Path.GetFileName(tm) : "no Time Machine backup found"));
-        var auto = Sh.Text("/usr/bin/defaults", "read /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates");
+        var auto = Sh.Text("/usr/bin/defaults", "read", "/Library/Preferences/com.apple.SoftwareUpdate", "AutomaticallyInstallMacOSUpdates");
         list.Add(new("Automatic macOS updates", auto == "1" ? true : auto == "0" ? false : null, auto == "1" ? "on" : auto == "0" ? "off" : "not set (macOS default)"));
         if (checkUpdates)
         {
-            var su = Sh.Exec("/usr/sbin/softwareupdate", "-l", 180);
+            var su = Sh.Exec("/usr/sbin/softwareupdate", new[] { "-l" }, 180);
             var pending = su.Out.Split('\n').Count(l => l.TrimStart().StartsWith("* Label:", StringComparison.Ordinal));
             list.Add(new("Pending updates", pending == 0, pending == 0 ? "none" : $"{pending} update(s) waiting: install them in System Settings > General > Software Update"));
         }
@@ -124,21 +126,21 @@ public static class Machine
     /// <summary>Configuration profiles: adware sometimes installs one to lock the browser's search engine.</summary>
     public static List<string> Profiles()
     {
-        var r = Sh.Exec("/usr/bin/profiles", "list", 30);
+        var r = Sh.Exec("/usr/bin/profiles", new[] { "list" }, 30);
         return r.Out.Split('\n').Where(l => l.Contains("profileIdentifier", StringComparison.Ordinal)).Select(l => l.Split(':').Last().Trim()).ToList();
     }
 
     public static (bool Ok, string Summary) VerifyDisk()
     {
-        var r = Sh.Exec("/usr/sbin/diskutil", "verifyVolume /", 1800);
+        var r = Sh.Exec("/usr/sbin/diskutil", new[] { "verifyVolume", "/" }, 1800);
         if (r.Code == 0 && r.Out.Contains("appears to be OK", StringComparison.OrdinalIgnoreCase)) return (true, "The startup disk appears to be OK.");
         return r.Code == 0 ? (true, "Finished.") : (false, "Problems were found. Back up, then run First Aid from macOS Recovery.");
     }
 
     public static (bool Ok, string Summary) FlushDns()
     {
-        var a = Sh.Exec("/usr/bin/dscacheutil", "-flushcache", 30);
-        var b = Sh.Exec("/usr/bin/killall", "-HUP mDNSResponder", 30);
+        var a = Sh.Exec("/usr/bin/dscacheutil", new[] { "-flushcache" }, 30);
+        var b = Sh.Exec("/usr/bin/killall", new[] { "-HUP", "mDNSResponder" }, 30);
         return (a.Code == 0 && b.Code == 0, a.Code == 0 && b.Code == 0 ? "Saved web addresses cleared." : "Needs administrator rights (run with sudo).");
     }
 }

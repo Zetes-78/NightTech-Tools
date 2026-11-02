@@ -84,6 +84,12 @@ public partial class MainWindow : Window
         JunkGrid.ItemsSource = _junk;
         UserNote.Text = $"Signed in as {Environment.UserName}. Startup changes apply to this Windows account (and to everyone for machine-wide items). " +
                         $"Junk is cleared for all {_profiles.Count} account(s) on this PC.";
+        if (Machine.ConsoleUser() is { Length: > 0 } console && !console.Equals(Environment.UserName, StringComparison.OrdinalIgnoreCase))
+        {
+            UserNote.Text = $"CAUTION: Windows is signed in as {console}, but this tool is running as {Environment.UserName}. Startup, proxy and Recycle Bin changes " +
+                            $"would apply to {Environment.UserName}, not the customer. Close this, sign in as the customer and use right-click > Run as administrator.";
+            App.Log.Warn(UserNote.Text);
+        }
         Loaded += async (_, _) =>
         {
             await Job("Reading this PC", ct => { LoadStartup(); return Task.CompletedTask; });
@@ -114,6 +120,7 @@ public partial class MainWindow : Window
             Busy.IsIndeterminate = false;
             StopButton.IsEnabled = false;
             BusyText.Text = "Ready";
+            if (_closeAfterJob) { _closeAfterJob = false; _ = Dispatcher.InvokeAsync(Close); }
         }
     }
 
@@ -171,8 +178,12 @@ public partial class MainWindow : Window
 
     private async void Quick_Click(object sender, RoutedEventArgs e)
     {
-        if (MessageBox.Show(this, "Run the quick cleanup now?\n\nAsk the customer to save their work and close their programs first. Browsers will be closed so their caches can be cleared.",
-                "Night Tech Cleanup", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        var willTurnOff = _startup.Where(r => r.Item.Advice == StartupAdvice.TurnOff && r.Item.Enabled).Select(r => r.Item.Name).ToList();
+        var msg = "Run the quick cleanup now?\n\nAsk the customer to save their work and close their programs first. Browsers will be closed so their caches can be cleared.";
+        msg += willTurnOff.Count == 0 ? "\n\nNo startup programs will be turned off."
+            : $"\n\nThese startup programs will be turned off (check with the customer; you can turn any back on):\n  - {string.Join("\n  - ", willTurnOff.Take(15))}{(willTurnOff.Count > 15 ? $"\n  ...and {willTurnOff.Count - 15} more" : "")}";
+        if (_junk.Any(j => j.Selected && j.Category.Id == "recycle-bin")) msg += "\n\nThe Recycle Bin will be EMPTIED: anything in it is gone for good. Make sure the customer agrees.";
+        if (MessageBox.Show(this, msg, "Night Tech Cleanup", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         await Job("Quick cleanup", async ct =>
         {
             Say("Making a restore point...");
@@ -196,7 +207,7 @@ public partial class MainWindow : Window
             if (d.Active)
             {
                 Say("Updating Microsoft Defender...");
-                await Task.Run(() => Defender.UpdateSignatures(Say, ct), ct);
+                await UpdateDefender(ct);
                 Say("Quick scan with Microsoft Defender (5-15 minutes)...");
                 await RunScan(full: false, ct);
             }
@@ -266,11 +277,19 @@ public partial class MainWindow : Window
                     r = new JunkCleanResult { CategoryId = row.Category.Id, Name = row.Name, BytesFreed = ok ? before : 0 };
                     break;
                 case "delivery-opt":
-                    var dBefore = row.Bytes;
+                    var dBefore = (await Task.Run(() => Junk.Scan(row.Category, _locations, DateTime.Now, _profiles, ct), ct)).Bytes;
                     var dOk = await Task.Run(SpecialJunk.ClearDeliveryOptimization, ct);
-                    r = dOk ? new JunkCleanResult { CategoryId = row.Category.Id, Name = row.Name, BytesFreed = dBefore }
-                            : await Task.Run(() => Junk.Clean(row.Category, _locations, DateTime.Now, _profiles, ct), ct);
+                    if (dOk)
+                    {
+                        var dAfter = (await Task.Run(() => Junk.Scan(row.Category, _locations, DateTime.Now, _profiles, ct), ct)).Bytes;
+                        r = new JunkCleanResult { CategoryId = row.Category.Id, Name = row.Name, BytesFreed = Math.Max(0, dBefore - dAfter) };
+                    }
+                    else r = await Task.Run(() => Junk.Clean(row.Category, _locations, DateTime.Now, _profiles, ct), ct);
                     break;
+                case "windows-temp" when Machine.RestartPending():
+                    App.Log.Warn("Windows temporary files skipped: an update or install is waiting for a restart. Restart, then clean again.");
+                    AddTask("Junk", "Windows temporary files", ItemResult.Skipped, "an update or install was waiting for a restart; restart, then clean again");
+                    continue;
                 case "update-cache":
                     await Task.Run(SpecialJunk.PauseUpdates, ct);
                     try { r = await Task.Run(() => Junk.Clean(row.Category, _locations, DateTime.Now, _profiles, ct), ct); }
@@ -296,14 +315,22 @@ public partial class MainWindow : Window
                 MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes) CloseBrowsers();
     }
 
+    /// <summary>Closes the browsers in this Windows session only (never another signed-in person's): windows first, so they shut down cleanly, then anything left.</summary>
     private static void CloseBrowsers()
     {
+        var session = Process.GetCurrentProcess().SessionId;
         foreach (var name in new[] { "chrome", "msedge", "brave", "firefox" })
-            foreach (var p in Process.GetProcessesByName(name))
+        {
+            var mine = Process.GetProcessesByName(name).Where(p => { try { return p.SessionId == session; } catch (Exception e) when (e is InvalidOperationException or Win32Exception) { return false; } }).ToList();
+            foreach (var p in mine) { try { if (p.MainWindowHandle != IntPtr.Zero) p.CloseMainWindow(); } catch (Exception e) when (e is InvalidOperationException or Win32Exception) { } }
+            var until = DateTime.Now.AddSeconds(8);
+            while (DateTime.Now < until && mine.Any(p => { try { return !p.HasExited; } catch (InvalidOperationException) { return false; } })) Thread.Sleep(250);
+            foreach (var p in mine)
             {
-                try { if (!p.CloseMainWindow()) p.Kill(); p.WaitForExit(3000); if (!p.HasExited) p.Kill(); }
+                try { if (!p.HasExited) p.Kill(); }
                 catch (Exception e) when (e is InvalidOperationException or Win32Exception) { }
             }
+        }
     }
 
     // ---------------- Startup ----------------
@@ -323,7 +350,7 @@ public partial class MainWindow : Window
             var was = row.Item.Enabled;
             StartupReader.Set(row.Item, on);
             if (!_startupChanges.Any(c => c.Item.Name == row.Item.Name && c.Item.Source == row.Item.Source)) _startupChanges.Add((row.Item, was));
-            _report.Tasks.RemoveAll(t => t.Area == "Startup" && t.What.EndsWith(" " + row.Item.Name, StringComparison.Ordinal));
+            _report.Tasks.RemoveAll(t => t.Area == "Startup" && (t.What == "Turned on " + row.Item.Name || t.What == "Turned off " + row.Item.Name));
             var original = _startupChanges.First(c => c.Item.Name == row.Item.Name && c.Item.Source == row.Item.Source).WasOn;
             if (on != original) AddTask("Startup", (on ? "Turned on " : "Turned off ") + row.Item.Name, ItemResult.Done, row.Item.Why);
         }
@@ -406,7 +433,7 @@ public partial class MainWindow : Window
                 Say($"Uninstalling {row.P.Name} (finish its uninstaller)...");
                 int code;
                 try { code = await Task.Run(() => ProgramReader.Uninstall(row.P, ct), ct); }
-                catch (Win32Exception ex) { AddTask("Programs", "Remove " + row.P.Name, ItemResult.Failed, ex.Message); continue; }
+                catch (Exception ex) when (ex is Win32Exception or FileNotFoundException or InvalidOperationException) { AddTask("Programs", "Remove " + row.P.Name, ItemResult.Failed, ex.Message); continue; }
                 var still = !row.P.IsStoreApp
                     ? (await Task.Run(ProgramReader.Desktop, ct)).Any(p => p.Name == row.P.Name)
                     : (await Task.Run(ProgramReader.StoreAppsWorthReviewing, ct)).Any(p => p.PackageName == row.P.PackageName);
@@ -428,7 +455,7 @@ public partial class MainWindow : Window
 
     private async void QuickScan_Click(object sender, RoutedEventArgs e) => await Job("Updating Defender and running a quick scan", async ct =>
     {
-        await Task.Run(() => Defender.UpdateSignatures(Say, ct), ct);
+        await UpdateDefender(ct);
         await RunScan(false, ct);
     });
 
@@ -436,7 +463,15 @@ public partial class MainWindow : Window
     {
         if (MessageBox.Show(this, "A full scan checks every file and usually takes an hour or more. The PC can be used meanwhile. Start it?", "Night Tech Cleanup",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-        await Job("Full scan with Microsoft Defender", async ct => { await Task.Run(() => Defender.UpdateSignatures(Say, ct), ct); await RunScan(true, ct); });
+        await Job("Full scan with Microsoft Defender", async ct => { await UpdateDefender(ct); await RunScan(true, ct); });
+    }
+
+    private async Task UpdateDefender(CancellationToken ct)
+    {
+        var u = await Task.Run(() => Defender.UpdateSignatures(Say, ct), ct);
+        _report.Tasks.RemoveAll(t => t.Area == "Security" && t.What == "Updated Microsoft Defender's virus definitions");
+        AddTask("Security", "Updated Microsoft Defender's virus definitions", u.ExitCode == 0 ? ItemResult.Done : ItemResult.Warning,
+            u.ExitCode == 0 ? "" : "the update didn't finish (no internet?): the scan used the definitions already on the PC");
     }
 
     private async Task RunScan(bool full, CancellationToken ct)
@@ -447,6 +482,15 @@ public partial class MainWindow : Window
         foreach (var t in threats) if (!_report.Threats.Contains(t)) _report.Threats.Add(t);
         var what = full ? "Full scan with Microsoft Defender" : "Quick scan with Microsoft Defender";
         if (r.ExitCode == -1) { AddTask("Security", what, ItemResult.Skipped, "stopped before it finished"); return; }
+        // MpCmdRun returns 2 both for "threats found" and for errors, so a scan only counts as done when it says it finished.
+        bool finished = r.ExitCode == 0 || r.Output.Contains("Scan finished", StringComparison.OrdinalIgnoreCase);
+        if (!finished && threats.Count == 0)
+        {
+            AddTask("Security", what, ItemResult.Warning, "the scan didn't finish: " + Proc.Trim(r.Output, 160));
+            ThreatText.Text = $"{what} didn't finish. Open Windows Security and run it there.";
+            await RefreshDefenderText();
+            return;
+        }
         AddTask("Security", what, threats.Count == 0 ? ItemResult.Done : ItemResult.Warning, threats.Count == 0 ? "no threats found" : $"{threats.Count} threat(s) found: see below");
         ThreatText.Text = threats.Count == 0 ? $"{what}: no threats found." : $"{what} found:\n" + string.Join("\n", threats);
         await RefreshDefenderText();
@@ -456,21 +500,24 @@ public partial class MainWindow : Window
 
     private void CheckHijacks_Click(object sender, RoutedEventArgs e) => _ = Task.Run(CheckHijacks);
 
+    /// <summary>Runs in the background; everything it changes on screen or in the report happens back on the window's thread.</summary>
     private void CheckHijacks()
     {
         var found = new List<string>();
+        string? proxy = null;
+        var hosts = new List<string>();
         try { found.AddRange(Hijacks.Browsers(_profiles)); } catch (Exception ex) { App.Log.Warn("Browser check: " + ex.Message); }
-        var proxy = Hijacks.Proxy();
+        try { proxy = Hijacks.Proxy(); } catch (Exception ex) { App.Log.Warn("Proxy check: " + ex.Message); }
         if (proxy is not null) found.Insert(0, "PROXY: " + proxy);
-        var hosts = Hijacks.HostsEntries();
+        try { hosts = Hijacks.HostsEntries(); } catch (Exception ex) { App.Log.Warn("Hosts check: " + ex.Message); }
         if (hosts.Count > 0) found.Insert(0, $"HOSTS FILE: {hosts.Count} custom entr{(hosts.Count == 1 ? "y" : "ies")}, e.g. {hosts[0]}");
-        foreach (var f in found.Where(f => !f.Contains(": extension \"")))
-        {
-            var clean = f.Replace("PROXY: ", "").Replace("HOSTS FILE: ", "The hosts file has ");
-            if (!_report.Findings.Contains(clean)) _report.Findings.Add(clean);
-        }
         Dispatcher.InvokeAsync(() =>
         {
+            foreach (var f in found.Where(f => !f.Contains(": extension \"")))
+            {
+                var clean = f.Replace("PROXY: ", "").Replace("HOSTS FILE: ", "The hosts file has ");
+                if (!_report.Findings.Contains(clean)) _report.Findings.Add(clean);
+            }
             HijackList.ItemsSource = found.Count == 0 ? new List<string> { "Nothing unusual found." } : found;
             ResetProxyButton.IsEnabled = proxy is not null;
             ResetHostsButton.IsEnabled = hosts.Count > 0;
@@ -573,11 +620,21 @@ public partial class MainWindow : Window
         Process.Start(new ProcessStartInfo("explorer.exe", _lastReport is null ? $"\"{App.ReportsFolder}\"" : $"/select,\"{_lastReport}\"") { UseShellExecute = true });
     }
 
+    private bool _closeAfterJob;
+
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        if (IsBusy && MessageBox.Show(this, "A job is still running. Stop it and close?", "Night Tech Cleanup", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-        { e.Cancel = true; return; }
-        _cts?.Cancel();
+        if (IsBusy)
+        {
+            // Never exit mid-job: Windows Update could be left paused or a setting half-changed. Stop, let it tidy up, then close.
+            e.Cancel = true;
+            if (_closeAfterJob) return;
+            if (MessageBox.Show(this, "A job is still running. Stop it and close when it has tidied up?", "Night Tech Cleanup", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            _closeAfterJob = true;
+            BusyText.Text = "Stopping safely, then closing...";
+            _cts?.Cancel();
+            return;
+        }
         if (_report.Tasks.Count + _report.Junk.Count > 0 && _lastReport is null &&
             MessageBox.Show(this, "The report hasn't been saved. Close anyway?", "Night Tech Cleanup", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             e.Cancel = true;

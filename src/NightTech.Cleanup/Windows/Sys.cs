@@ -83,6 +83,37 @@ public static class Proc
 /// <summary>This computer: user profiles, measurements, restore point.</summary>
 public static class Machine
 {
+    /// <summary>True when an update or install is waiting for a restart (its files may be sitting in Windows\Temp).</summary>
+    public static bool RestartPending()
+    {
+        try
+        {
+            using (var k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager"))
+                if (k?.GetValue("PendingFileRenameOperations") is string[] { Length: > 0 }) return true;
+            using (var k = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending")) if (k is not null) return true;
+            using (var k = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired")) if (k is not null) return true;
+        }
+        catch (Exception e) when (e is System.Security.SecurityException or UnauthorizedAccessException or IOException) { return true; }
+        return false;
+    }
+
+    [DllImport("kernel32.dll")] private static extern uint WTSGetActiveConsoleSessionId();
+    [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool WTSQuerySessionInformation(IntPtr server, uint session, int infoClass, out IntPtr buffer, out uint bytes);
+    [DllImport("wtsapi32.dll")] private static extern void WTSFreeMemory(IntPtr memory);
+
+    /// <summary>The person signed in at the screen ("" if nobody or unknown).</summary>
+    public static string ConsoleUser()
+    {
+        try
+        {
+            var id = WTSGetActiveConsoleSessionId();
+            if (id == 0xFFFFFFFF || !WTSQuerySessionInformation(IntPtr.Zero, id, 5 /* WTSUserName */, out var buf, out _)) return "";
+            try { return Marshal.PtrToStringUni(buf) ?? ""; } finally { WTSFreeMemory(buf); }
+        }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { return ""; }
+    }
+
     public static string WindowsDir => Environment.GetFolderPath(Environment.SpecialFolder.Windows);
     public static string ProgramData => Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
     public static string SystemDrive => Path.GetPathRoot(WindowsDir) ?? @"C:\";

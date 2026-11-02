@@ -67,10 +67,16 @@ public static class Startup
         {
             // Unquoted paths with spaces: take the shortest prefix ending in .exe/.cmd/.bat/.lnk.
             int idx = -1;
+            // The extension has to end the path (a space or the end follows), so "C:\my.company\app.exe" isn't cut at ".com".
             foreach (var ext in new[] { ".exe", ".cmd", ".bat", ".lnk", ".com", ".dll" })
             {
-                int i = c.IndexOf(ext, StringComparison.OrdinalIgnoreCase);
-                if (i >= 0 && (idx < 0 || i + ext.Length < idx)) idx = i + ext.Length;
+                for (int i = c.IndexOf(ext, StringComparison.OrdinalIgnoreCase); i >= 0; i = c.IndexOf(ext, i + 1, StringComparison.OrdinalIgnoreCase))
+                {
+                    int e = i + ext.Length;
+                    if (e < c.Length && c[e] != ' ' && c[e] != ',') continue;
+                    if (idx < 0 || e < idx) idx = e;
+                    break;
+                }
             }
             if (idx > 0) { exe = c[..idx]; rest = c[idx..].Trim(); }
             else { int sp = c.IndexOf(' '); exe = sp > 0 ? c[..sp] : c; rest = sp > 0 ? c[(sp + 1)..] : ""; }
@@ -81,10 +87,57 @@ public static class Startup
         return Environment.ExpandEnvironmentVariables(exe);
     }
 
+    /// <summary>
+    /// A command line to run, split into the program and its arguments exactly as written (nothing unwrapped, so
+    /// "rundll32.exe x.dll,Uninstall /q" stays rundll32 with its arguments). A bare first word with no folder in it
+    /// ("RunDll32 ...", "MsiExec.exe /X{...}") is the program. Environment variables are expanded first.
+    /// </summary>
+    public static (string File, string Args) SplitCommand(string command)
+    {
+        var c = Environment.ExpandEnvironmentVariables((command ?? "").Trim());
+        if (c.Length == 0) return ("", "");
+        if (c[0] == '"')
+        {
+            int end = c.IndexOf('"', 1);
+            return end > 0 ? (c[1..end], c[(end + 1)..].Trim()) : (c.Trim('"'), "");
+        }
+        int sp = c.IndexOf(' ');
+        var first = sp > 0 ? c[..sp] : c;
+        if (!first.Contains('\\') && !first.Contains('/')) return (first, sp > 0 ? c[(sp + 1)..].Trim() : "");
+        foreach (var ext in new[] { ".exe", ".com", ".bat", ".cmd" })
+            for (int i = c.IndexOf(ext, StringComparison.OrdinalIgnoreCase); i >= 0; i = c.IndexOf(ext, i + 1, StringComparison.OrdinalIgnoreCase))
+            {
+                int e = i + ext.Length;
+                if (e < c.Length && c[e] != ' ') continue;
+                return (c[..e], c[e..].Trim());
+            }
+        return (first, sp > 0 ? c[(sp + 1)..].Trim() : "");
+    }
+
     private static readonly (string Match, StartupAdvice Advice, string Why)[] Rules =
     {
-        // Keep: security, drivers and hardware helpers.
+        // Keep: security, company management, drivers and hardware helpers.
         ("SecurityHealth", StartupAdvice.Keep, "Windows Security"),
+        ("Sophos", StartupAdvice.Keep, "Security software"),
+        ("Trend Micro", StartupAdvice.Keep, "Security software"),
+        ("TrendMicro", StartupAdvice.Keep, "Security software"),
+        ("CrowdStrike", StartupAdvice.Keep, "Security software"),
+        ("SentinelOne", StartupAdvice.Keep, "Security software"),
+        ("Sentinel Agent", StartupAdvice.Keep, "Security software"),
+        ("Webroot", StartupAdvice.Keep, "Security software"),
+        ("Huntress", StartupAdvice.Keep, "Security software"),
+        ("Avira", StartupAdvice.Keep, "Security software"),
+        ("Cylance", StartupAdvice.Keep, "Security software"),
+        ("ThreatLocker", StartupAdvice.Keep, "Security software"),
+        ("Jamf", StartupAdvice.Keep, "Company device management: don't turn off"),
+        ("Intune", StartupAdvice.Keep, "Company device management: don't turn off"),
+        ("Kandji", StartupAdvice.Keep, "Company device management: don't turn off"),
+        ("Datto", StartupAdvice.Keep, "IT company's management agent: don't turn off"),
+        ("NinjaRMM", StartupAdvice.Keep, "IT company's management agent: don't turn off"),
+        ("Kaseya", StartupAdvice.Keep, "IT company's management agent: don't turn off"),
+        ("AnyConnect", StartupAdvice.Keep, "Work VPN"),
+        ("GlobalProtect", StartupAdvice.Keep, "Work VPN"),
+        ("FortiClient", StartupAdvice.Keep, "Work VPN/security"),
         ("WindowsDefender", StartupAdvice.Keep, "Windows Security"),
         ("Realtek", StartupAdvice.Keep, "Sound driver"),
         ("RtkAud", StartupAdvice.Keep, "Sound driver"),
@@ -144,10 +197,17 @@ public static class Startup
         ("Acer", StartupAdvice.Optional, "Acer helper: turn off unless they use it"),
     };
 
-    /// <summary>Our suggestion for a startup item. Anything flagged as unwanted software is always "turn off".</summary>
+    /// <summary>
+    /// Our suggestion for a startup item. Rules match whole words in the item's name, its program's file name and its
+    /// publisher (never folder names in the command), so "Original Prusa" isn't "Origin" and "KnowledgeBase" isn't Edge.
+    /// Security and company-management software is always kept; known unwanted software is always "turn off".
+    /// </summary>
     public static void Advise(StartupItem item)
     {
-        var text = item.Name + " " + item.Command + " " + item.Publisher;
+        var exe = item.Command.Length > 0 ? ExecutablePath(item.Command).Split('\\', '/')[^1] : "";
+        var words = Words.Of(item.Name + " " + System.IO.Path.GetFileNameWithoutExtension(exe) + " " + item.Publisher);
+        foreach (var (m, a, w) in Rules.Where(r => r.Advice == StartupAdvice.Keep))
+            if (Words.Has(words, m)) { item.Advice = a; item.Why = w; return; }
         if (Programs.Flag(item.Name, item.Publisher) is { Level: FlagLevel.Unwanted } bad)
         {
             item.Advice = StartupAdvice.TurnOff;
@@ -155,10 +215,37 @@ public static class Startup
             return;
         }
         foreach (var (m, a, w) in Rules)
-            if (text.Contains(m, StringComparison.OrdinalIgnoreCase)) { item.Advice = a; item.Why = w; return; }
-        if (item.Command.Contains("update", StringComparison.OrdinalIgnoreCase) || item.Name.Contains("update", StringComparison.OrdinalIgnoreCase))
-        { item.Advice = StartupAdvice.TurnOff; item.Why = "Updater: the program checks for updates when it's opened"; return; }
+            if (Words.Has(words, m)) { item.Advice = a; item.Why = w; return; }
+        if (words.Any(t => t.StartsWith("update", StringComparison.OrdinalIgnoreCase)))
+        { item.Advice = StartupAdvice.Optional; item.Why = "Updater: usually fine to turn off (the program checks for updates when it's opened)"; return; }
         item.Advice = StartupAdvice.Unknown;
         item.Why = string.IsNullOrEmpty(item.Publisher) ? "Unknown program with no publisher: look it up before deciding" : "Ask the customer if they use it";
+    }
+}
+
+/// <summary>Whole-word matching for program names: "SecurityHealthSystray.exe" is Security, Health, Systray.</summary>
+public static class Words
+{
+    public static List<string> Of(string text)
+    {
+        var list = new List<string>();
+        foreach (var chunk in System.Text.RegularExpressions.Regex.Split(text ?? "", "[^A-Za-z0-9+]+"))
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(chunk, "[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+|\\+"))
+                list.Add(m.Value);
+        return list;
+    }
+
+    /// <summary>True when the phrase's words appear in a row (ignoring case).</summary>
+    public static bool Has(List<string> words, string phrase)
+    {
+        var p = Of(phrase);
+        if (p.Count == 0) return false;
+        for (int i = 0; i + p.Count <= words.Count; i++)
+        {
+            int k = 0;
+            while (k < p.Count && words[i + k].Equals(p[k], StringComparison.OrdinalIgnoreCase)) k++;
+            if (k == p.Count) return true;
+        }
+        return false;
     }
 }
