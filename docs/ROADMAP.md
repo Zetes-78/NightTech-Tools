@@ -12,7 +12,7 @@ shop's office software and lives in its own repository.
 - [ ] **Night Tech Wipe v2**: SSD/NVMe built-in secure erase and sanitize; detect and clear HPA/DCO
 
 ## Phase 2: next 1 to 3 months
-- [ ] **Recovery step 2: file carver** (JPEG, PNG, HEIC, MP4/MOV, PDF, Office/ZIP) working on the image
+- [x] **Recovery step 2: file carver** (JPEG, PNG, GIF, BMP, HEIC/AVIF, MP4/MOV/3GP/M4A, PDF, Word/Excel/PowerPoint, ZIP) working on the image
 - [ ] **Recovery step 3: undelete and partition recovery** (NTFS, FAT32, exFAT; lost partitions)
 - [ ] **Recovery step 4**: thumbnails, sorting, customer report, case tracking tied to the Hub ticket
 - [ ] **Burn-in tester**: CPU, memory, drive health and battery, with a printed pass/fail sheet

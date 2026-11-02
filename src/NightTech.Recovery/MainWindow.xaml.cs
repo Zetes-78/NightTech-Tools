@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     private bool _caseNameTouched;
     private bool _settingCaseName;
     private string? _lastCaseFolder;
+    private RecoverFilesWindow? _recoverWindow;
 
     public MainWindow()
     {
@@ -286,6 +287,28 @@ public partial class MainWindow : Window
         MessageBox.Show(this, msg, "Night Tech Recovery", MessageBoxButton.OK, icon);
     }
 
+    // ---------------- Step 5: recover files from the image ----------------
+
+    private void Recover_Click(object sender, RoutedEventArgs e)
+    {
+        if (_recoverWindow is { IsLoaded: true }) { _recoverWindow.Activate(); return; }
+        _recoverWindow = new RecoverFilesWindow(CurrentImagePath(), Clean(TicketBox.Text), Clean(TechBox.Text)) { Owner = this };
+        _recoverWindow.Closed += (_, _) => _recoverWindow = null;
+        _recoverWindow.Show();
+    }
+
+    /// <summary>The image of the case on screen, if it exists.</summary>
+    private string? CurrentImagePath()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(FolderBox.Text) || string.IsNullOrWhiteSpace(CaseBox.Text)) return null;
+            var path = CaseFiles.For(FolderBox.Text.Trim(), CaseBox.Text).ImagePath;
+            return File.Exists(path) ? path : null;
+        }
+        catch { return null; }
+    }
+
     private void OpenFolder_Click(object sender, RoutedEventArgs e)
     {
         if (_lastCaseFolder is not null && Directory.Exists(_lastCaseFolder))
@@ -299,11 +322,19 @@ public partial class MainWindow : Window
         RefreshButton.IsEnabled = !running;
         DiskList.IsEnabled = !running;
         FolderBox.IsEnabled = TicketBox.IsEnabled = CaseBox.IsEnabled = !running;
+        RecoverButton.IsEnabled = !running;   // the image is still being written
         if (running) OpenFolderButton.IsEnabled = false;
     }
 
     private async void Window_Closing(object? sender, CancelEventArgs e)
     {
+        if (_recoverWindow is { IsRunning: true })
+        {
+            e.Cancel = true;
+            _recoverWindow.Activate();
+            Warn("A file recovery scan is running. Stop it or let it finish first.");
+            return;
+        }
         if (_job is null || _cts is null) return;
         e.Cancel = true;
         if (MessageBox.Show(this, "Imaging is running. Stop it and close? Progress is saved so you can resume later.",

@@ -1,0 +1,118 @@
+<Window x:Class="NightTech.Recovery.RecoverFilesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Night Tech Recovery: recover files"
+        Width="820" Height="760" MinWidth="680" MinHeight="600"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource Page}"
+        Icon="Assets/logo-icon.png"
+        Closing="Window_Closing">
+  <DockPanel>
+    <Border DockPanel.Dock="Top" Background="{StaticResource Navy}" Padding="20,14">
+      <StackPanel>
+        <TextBlock Text="Recover files" Foreground="White" FontSize="20" FontWeight="SemiBold" />
+        <TextBlock Text="Finds photos, videos and documents in a drive image by their contents, including deleted files. The image is only read, never changed."
+                   Foreground="#DBE7F5" FontSize="13" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <StackPanel Margin="20,16">
+
+        <Border Style="{StaticResource Card}">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="140" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBlock Grid.ColumnSpan="2" Text="1. Image and destination" Style="{StaticResource SectionTitle}" />
+
+            <TextBlock Grid.Row="1" Text="Drive image (.img)" VerticalAlignment="Center" />
+            <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,4">
+              <Button DockPanel.Dock="Right" Content="Browse..." Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="BrowseImage_Click" />
+              <TextBox x:Name="ImageBox" TextChanged="ImageBox_TextChanged" />
+            </DockPanel>
+
+            <TextBlock Grid.Row="2" Text="Save found files to" VerticalAlignment="Center" />
+            <DockPanel Grid.Row="2" Grid.Column="1" Margin="0,4">
+              <Button DockPanel.Dock="Right" Content="Browse..." Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="BrowseOutput_Click" />
+              <TextBox x:Name="OutputBox" TextChanged="OutputBox_TextChanged" />
+            </DockPanel>
+
+            <TextBlock Grid.Row="3" Text="Hub ticket #" VerticalAlignment="Center" />
+            <TextBox Grid.Row="3" Grid.Column="1" x:Name="TicketBox" Margin="0,4" />
+
+            <TextBlock Grid.Row="4" Text="Technician" VerticalAlignment="Center" />
+            <TextBox Grid.Row="4" Grid.Column="1" x:Name="TechBox" Margin="0,4" />
+
+            <TextBlock Grid.Row="5" Grid.ColumnSpan="2" x:Name="PathHint" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,0" />
+          </Grid>
+        </Border>
+
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
+            <TextBlock Text="2. What to look for" Style="{StaticResource SectionTitle}" />
+            <WrapPanel>
+              <CheckBox x:Name="PhotosBox" Content="Photos (JPG, PNG, GIF, BMP, HEIC)" IsChecked="True" Margin="0,4,20,4" />
+              <CheckBox x:Name="VideosBox" Content="Videos (MP4, MOV, 3GP)" IsChecked="True" Margin="0,4,20,4" />
+              <CheckBox x:Name="AudioBox" Content="Audio (M4A)" IsChecked="True" Margin="0,4,20,4" />
+              <CheckBox x:Name="DocumentsBox" Content="Documents (PDF, Word, Excel, PowerPoint)" IsChecked="True" Margin="0,4,20,4" />
+              <CheckBox x:Name="ArchivesBox" Content="Zip files" IsChecked="True" Margin="0,4,20,4" />
+            </WrapPanel>
+            <CheckBox x:Name="SmallBox" Content="Skip tiny pictures under 1 KB (icons and thumbnails)" IsChecked="True" Margin="0,8,0,0" />
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
+            <TextBlock Text="3. Scan" Style="{StaticResource SectionTitle}" />
+            <Button x:Name="StartButton" Content="Start scan" Style="{StaticResource PrimaryButton}" Click="Start_Click" />
+            <Button x:Name="StopButton" Content="Stop (keeps what was found)" Style="{StaticResource PlainButton}" Margin="0,8,0,0"
+                    Click="Stop_Click" IsEnabled="False" />
+            <TextBlock x:Name="PhaseText" Text="Ready" FontWeight="SemiBold" Margin="0,16,0,6" />
+            <ProgressBar x:Name="Bar" Height="18" Minimum="0" Maximum="100" Foreground="{StaticResource Orange}" />
+            <TextBlock x:Name="PercentText" HorizontalAlignment="Right" Foreground="{StaticResource Muted}" Margin="0,4,0,8" />
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
+              </Grid.RowDefinitions>
+              <TextBlock Grid.Row="0" Text="Scanned" Foreground="{StaticResource Muted}" Margin="0,2,16,2" />
+              <TextBlock Grid.Row="0" Grid.Column="1" x:Name="ScannedText" Text="-" />
+              <TextBlock Grid.Row="1" Text="Files found" Foreground="{StaticResource Muted}" Margin="0,2,16,2" />
+              <TextBlock Grid.Row="1" Grid.Column="1" x:Name="FoundText" Text="-" />
+              <TextBlock Grid.Row="2" Text="Speed" Foreground="{StaticResource Muted}" Margin="0,2,16,2" />
+              <TextBlock Grid.Row="2" Grid.Column="1" x:Name="SpeedText" Text="-" />
+              <TextBlock Grid.Row="3" Text="Time left" Foreground="{StaticResource Muted}" Margin="0,2,16,2" />
+              <TextBlock Grid.Row="3" Grid.Column="1" x:Name="EtaText" Text="-" />
+            </Grid>
+            <Button x:Name="OpenButton" Content="Open the found files" Style="{StaticResource PlainButton}" Margin="0,16,0,0"
+                    Click="Open_Click" IsEnabled="False" />
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
+            <TextBlock Text="Before handing files over" Style="{StaticResource SectionTitle}" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}">
+              Found files get new names (by where they were on the drive), not their original names or folders.
+              A file stored in pieces may open damaged or partly gray. Open each one you hand over.
+              Results are not guaranteed. A drive that clicks, isn't detected, or keeps failing goes to a lab.
+            </TextBlock>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</Window>

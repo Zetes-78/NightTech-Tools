@@ -5,14 +5,14 @@ In-house software for **Night Tech Solutions** (https://nighttech.solutions), bu
 | Project | What it is | Status |
 |---|---|---|
 | `src/NightTech.Core` | Shared library: branding, logging, the imaging engine, case files and reports | v0.1 |
-| `src/NightTech.Recovery` | **Night Tech Recovery**, the shop's data recovery tool. Step 1: read-only drive imager | v0.1 |
+| `src/NightTech.Recovery` | **Night Tech Recovery**, the shop's data recovery tool. Read-only drive imager, plus file recovery from the image | v0.2 |
 | `src/NightTech.Wipe` | **Night Tech Wipe**: erases a whole drive, checks every sector, writes the record for the Hub's wipe certificate | v0.1 |
 | `src/NightTech.FieldKit` | **Night Tech Field Kit**, a computer health check that runs from a USB stick and leaves a customer report | v0.1 |
 | `tests/NightTech.Core.Tests` | Automated tests for the engine (run on every push) | |
 
 See `docs/ROADMAP.md` for everything planned next.
 
-## Night Tech Recovery: drive imager
+## Night Tech Recovery: drive imager and file recovery
 
 Makes a sector-by-sector copy (image) of a customer's drive. **All recovery work then happens on the image, never on the original.**
 
@@ -25,6 +25,16 @@ Makes a sector-by-sector copy (image) of a customer's drive. **All recovery work
 Each case is one folder: `<case>.img`, `<case>.map.json`, `<case>-report.txt`, `<case>-report.json`.
 
 **Before connecting a customer drive:** use a hardware write blocker, or turn off Windows automount (`mountvol /N` in an administrator prompt, `mountvol /E` to turn it back on). Night Tech Recovery itself never writes to the drive, but Windows can when it mounts one.
+
+### Recover files (step 2)
+
+Once the image is made, **Recover files from an image...** scans the `.img` and copies out the photos, videos and documents it finds, including deleted ones. It works only on the image (the customer's drive can be unplugged) and opens it read-only.
+
+- **Types:** photos (JPG, PNG, GIF, BMP, HEIC, AVIF), videos (MP4, MOV, 3GP), audio (M4A), documents (PDF, Word, Excel, PowerPoint) and zip files.
+- **How:** checks every sector for the start of a known file, then follows that format's own structure to where the file ends. Anything that doesn't follow the structure is skipped, which keeps random data and broken leftovers out of the results. A picture inside another file (a camera thumbnail, say) isn't saved twice.
+- **Output:** a `Recovered files` folder next to the image, sorted into `Photos`, `Videos`, `Audio`, `Documents` and `Archives`. Files are named by where they were on the drive (`jpg-0000123456.jpg`), because original names aren't stored with the contents.
+- **Report:** `recovered-files-<date>-report.txt` for the customer file and `.json` for the Hub ticket. Stop any time: what was found so far is kept and the report says how far the scan got.
+- **Limits:** a file stored in pieces (fragmented) may come back damaged. Open each file before handing it over. Results are not guaranteed.
 
 ## Night Tech Field Kit: computer health check
 
