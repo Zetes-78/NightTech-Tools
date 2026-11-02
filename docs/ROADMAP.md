@@ -8,7 +8,8 @@ shop's office software and lives in its own repository.
 - [x] **Shared foundation** (`NightTech.Core`): branding, logging, reports
 - [x] **Night Tech Recovery, step 1: drive imager** (read only, 3 passes, resume, SHA-256, reports)
 - [x] **Night Tech Hub upgrades** (Hub 1.1): intake photos, condition notes, on-screen signature, status-text templates, quote builder with Square link (6% SC tax), attach Recovery reports to tickets
-- [ ] **Night Tech Wipe**: HDD overwrite with verification; SSD/NVMe built-in secure erase; results sent to the Hub's wipe certificate
+- [x] **Night Tech Wipe v1**: overwrite with full verification for any drive; record fills the Hub's wipe certificate
+- [ ] **Night Tech Wipe v2**: SSD/NVMe built-in secure erase and sanitize; detect and clear HPA/DCO
 
 ## Phase 2: next 1 to 3 months
 - [ ] **Recovery step 2: file carver** (JPEG, PNG, HEIC, MP4/MOV, PDF, Office/ZIP) working on the image

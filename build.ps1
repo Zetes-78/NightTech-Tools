@@ -36,7 +36,8 @@ function Write-Hash([string]$file) {
 $tools = @(
     @{ Name = "Night Tech Recovery";  Project = "src\NightTech.Recovery\NightTech.Recovery.csproj"; Out = "publish\recovery"; Iss = "installer\NightTechRecovery.iss"; Setup = "NightTechRecovery-Setup.exe"; SelfExtract = "true" },
     # Field Kit keeps its native files beside the exe instead of unpacking them to the customer's temp folder.
-    @{ Name = "Night Tech Field Kit"; Project = "src\NightTech.FieldKit\NightTech.FieldKit.csproj"; Out = "publish\fieldkit"; Iss = "installer\NightTechFieldKit.iss"; Setup = "NightTechFieldKit-Setup.exe"; SelfExtract = "false" }
+    @{ Name = "Night Tech Field Kit"; Project = "src\NightTech.FieldKit\NightTech.FieldKit.csproj"; Out = "publish\fieldkit"; Iss = "installer\NightTechFieldKit.iss"; Setup = "NightTechFieldKit-Setup.exe"; SelfExtract = "false" },
+    @{ Name = "Night Tech Wipe";      Project = "src\NightTech.Wipe\NightTech.Wipe.csproj";         Out = "publish\wipe";     Iss = "installer\NightTechWipe.iss";     Setup = "NightTechWipe-Setup.exe";     SelfExtract = "false" }
 )
 
 if (Test-Path publish) { Remove-Item -Recurse -Force publish }
@@ -54,7 +55,7 @@ foreach ($t in $tools) {
     Write-Hash "installer\Output\$($t.Setup)"
 }
 
-# USB kit: Field Kit plus Recovery in portable mode, ready to copy to a stick.
+# USB kit: Field Kit, Recovery and Wipe in portable mode, ready to copy to a stick.
 # The USB copy of Recovery keeps its native files beside the exe too, so neither tool unpacks anything
 # into the customer's temp folder, and portable.txt keeps both tools' logs and reports on the stick.
 Write-Host "== USB kit ==" -ForegroundColor Cyan
@@ -64,10 +65,11 @@ dotnet publish $tools[0].Project -c Release -r win-x64 --self-contained true `
     -o publish\recovery-usb
 if ($LASTEXITCODE -ne 0) { throw "Publishing the USB copy of Night Tech Recovery failed." }
 $kit = "publish\usb\Night Tech Field Kit"
-New-Item -ItemType Directory -Force "$kit\Field Kit", "$kit\Recovery" | Out-Null
+New-Item -ItemType Directory -Force "$kit\Field Kit", "$kit\Recovery", "$kit\Wipe" | Out-Null
 Copy-Item -Recurse publish\fieldkit\* "$kit\Field Kit"
 Copy-Item -Recurse publish\recovery-usb\* "$kit\Recovery"
-foreach ($dir in "$kit\Field Kit", "$kit\Recovery") {
+Copy-Item -Recurse publish\wipe\* "$kit\Wipe"
+foreach ($dir in "$kit\Field Kit", "$kit\Recovery", "$kit\Wipe") {
     "This file tells Night Tech tools to keep their logs and reports on this USB stick. Don't delete it." |
         Out-File -Encoding ascii "$dir\portable.txt"
 }

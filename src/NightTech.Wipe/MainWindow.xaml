@@ -1,0 +1,148 @@
+<Window x:Class="NightTech.Wipe.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Night Tech Wipe"
+        Width="1120" Height="860" MinWidth="920" MinHeight="680"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource Page}"
+        Icon="Assets/logo-icon.png"
+        Closing="Window_Closing">
+  <DockPanel>
+
+    <!-- Header -->
+    <Border DockPanel.Dock="Top" Background="{StaticResource Navy}" Padding="20,14">
+      <DockPanel>
+        <Border DockPanel.Dock="Left" Background="White" CornerRadius="8" Padding="4" Margin="0,0,14,0">
+          <Image Source="Assets/logo-icon.png" Width="40" Height="40" />
+        </Border>
+        <StackPanel DockPanel.Dock="Right" VerticalAlignment="Center">
+          <TextBlock x:Name="VersionText" Foreground="#A9BFD9" HorizontalAlignment="Right" />
+          <TextBlock x:Name="ModeText" Foreground="#A9BFD9" HorizontalAlignment="Right" />
+        </StackPanel>
+        <StackPanel VerticalAlignment="Center">
+          <TextBlock Text="Night Tech Wipe" Foreground="White" FontSize="20" FontWeight="SemiBold" />
+          <TextBlock Text="Permanently erases a whole drive, checks every sector, and makes the record for the Certificate of Data Wipe."
+                     Foreground="#DBE7F5" FontSize="13" TextWrapping="Wrap" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <!-- Footer log -->
+    <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="16,8">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top" Text="Activity" FontWeight="SemiBold" Foreground="{StaticResource Muted}" Margin="0,0,0,4" />
+        <ListBox x:Name="LogList" Height="90" BorderThickness="0" FontFamily="Consolas" FontSize="12" />
+      </DockPanel>
+    </Border>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <Grid Margin="20,16">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="3*" />
+          <ColumnDefinition Width="16" />
+          <ColumnDefinition Width="2*" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Grid.Column="0" x:Name="SetupPanel">
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <DockPanel>
+                <Button DockPanel.Dock="Right" x:Name="RefreshButton" Content="Refresh drives" Style="{StaticResource PlainButton}" Click="Refresh_Click" />
+                <TextBlock Text="1. Pick the drive to erase" Style="{StaticResource SectionTitle}" VerticalAlignment="Center" />
+              </DockPanel>
+              <ListBox x:Name="DiskList" Height="160" Margin="0,8,0,0" SelectionChanged="DiskList_SelectionChanged">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Display}" TextWrapping="Wrap" />
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="12"
+                         Text="PROTECTED drives (this PC's Windows and boot drive, and the drive this program runs from) can't be erased." />
+              <Border x:Name="DetailBox" Margin="0,10,0,0" Padding="12" Background="{StaticResource Page}" CornerRadius="6" Visibility="Collapsed">
+                <TextBlock x:Name="DetailText" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" />
+              </Border>
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="130" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+              </Grid.RowDefinitions>
+              <TextBlock Grid.ColumnSpan="2" Text="2. The job" Style="{StaticResource SectionTitle}" />
+              <TextBlock Grid.Row="1" Text="Ticket number" VerticalAlignment="Center" />
+              <TextBox Grid.Row="1" Grid.Column="1" x:Name="TicketBox" Margin="0,4" MaxLength="20" TextChanged="Inputs_Changed" />
+              <TextBlock Grid.Row="2" Text="Technician" VerticalAlignment="Center" />
+              <TextBox Grid.Row="2" Grid.Column="1" x:Name="TechBox" Margin="0,4" MaxLength="80" />
+              <TextBlock Grid.Row="3" Text="Notes" VerticalAlignment="Center" />
+              <TextBox Grid.Row="3" Grid.Column="1" x:Name="NotesBox" Margin="0,4" MaxLength="300" />
+              <TextBlock Grid.Row="4" Text="Pattern" VerticalAlignment="Center" />
+              <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,6">
+                <RadioButton x:Name="ZerosRadio" Content="Zeros (standard)" IsChecked="True" Margin="0,0,18,0" />
+                <RadioButton x:Name="RandomRadio" Content="Random data" />
+              </StackPanel>
+            </Grid>
+          </Border>
+
+          <Border Style="{StaticResource Card}" BorderBrush="{StaticResource Danger}" Background="{StaticResource DangerSoft}">
+            <StackPanel>
+              <TextBlock Text="3. Confirm" Style="{StaticResource SectionTitle}" Foreground="{StaticResource Danger}" />
+              <CheckBox x:Name="CheckOk" Checked="Inputs_Changed" Unchecked="Inputs_Changed">
+                <TextBlock TextWrapping="Wrap">
+                  The customer agreed in writing that everything on this drive can be erased, and anything they need is backed up.
+                </TextBlock>
+              </CheckBox>
+              <TextBlock x:Name="ConfirmLabel" Margin="0,10,0,4" TextWrapping="Wrap" Text="Type the drive's serial number to confirm:" />
+              <TextBox x:Name="ConfirmBox" FontFamily="Consolas" MaxLength="80" TextChanged="Inputs_Changed" />
+              <TextBlock x:Name="BlockedText" Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{StaticResource Danger}" />
+              <Button x:Name="WipeButton" Content="Erase this drive" Style="{StaticResource DangerButton}" Margin="0,12,0,0"
+                      IsEnabled="False" Click="Wipe_Click" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <StackPanel Grid.Column="2">
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <TextBlock Text="Progress" Style="{StaticResource SectionTitle}" />
+              <TextBlock x:Name="PhaseText" FontSize="15" FontWeight="SemiBold" Text="Not started" />
+              <ProgressBar x:Name="Bar" Height="18" Margin="0,8" Maximum="1000" />
+              <TextBlock x:Name="StatsText" TextWrapping="Wrap" Foreground="{StaticResource Muted}" />
+              <Button x:Name="StopButton" Content="Stop" Style="{StaticResource PlainButton}" Margin="0,10,0,0" IsEnabled="False" Click="Stop_Click" />
+            </StackPanel>
+          </Border>
+
+          <Border x:Name="ResultCard" Style="{StaticResource Card}" Visibility="Collapsed">
+            <StackPanel>
+              <TextBlock Text="Result" Style="{StaticResource SectionTitle}" />
+              <TextBlock x:Name="ResultText" TextWrapping="Wrap" FontSize="14" />
+              <Button Content="Open the wipe record" Style="{StaticResource PlainButton}" Margin="0,10,0,6" Click="OpenRecord_Click" />
+              <Button Content="Open reports folder" Style="{StaticResource PlainButton}" Click="OpenFolder_Click" />
+              <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" FontSize="12" Foreground="{StaticResource Muted}"
+                         Text="In Night Tech Hub, add the .json file on the ticket's Wipe card. It fills in the Certificate of Data Wipe." />
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <TextBlock Text="Before you erase" Style="{StaticResource SectionTitle}" />
+              <TextBlock TextWrapping="Wrap" Margin="0,0,0,6">• Connect only the drive you mean to erase, if you can. Unplug other customer drives.</TextBlock>
+              <TextBlock TextWrapping="Wrap" Margin="0,0,0,6">• Check the serial number on the drive's label matches the one shown here.</TextBlock>
+              <TextBlock TextWrapping="Wrap" Margin="0,0,0,6">• A drive that clicks or keeps dropping out can't be reliably erased. Destroy it physically.</TextBlock>
+              <TextBlock TextWrapping="Wrap">• Erasing takes a while. A 1 TB hard drive usually takes 3 to 5 hours: half to erase, half to check. Keep the PC plugged in.</TextBlock>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Grid>
+    </ScrollViewer>
+  </DockPanel>
+</Window>

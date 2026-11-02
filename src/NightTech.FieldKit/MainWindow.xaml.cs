@@ -170,6 +170,9 @@ public partial class MainWindow : Window
         var recovery = KitPaths.FindRecovery();
         if (recovery is not null)
             Add("Night Tech Recovery", "Image a drive before recovery work (admin)", () => Launch(recovery));
+        var wipe = KitPaths.FindWipe();
+        if (wipe is not null)
+            Add("Night Tech Wipe", "Erase a drive and make the wipe record (admin)", () => Launch(wipe));
 
         Add("Battery report", "Windows' full battery history, saved with the reports", () => _ = BatteryReportAsync());
         Add("Device Manager", "Missing drivers and failed devices", () => Launch("devmgmt.msc"));

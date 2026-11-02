@@ -5,6 +5,7 @@ SETTING UP THE STICK
 Copy everything in this zip to the top of a USB stick, so the stick has:
   Night Tech Field Kit\Field Kit\NightTechFieldKit.exe
   Night Tech Field Kit\Recovery\NightTechRecovery.exe
+  Night Tech Field Kit\Wipe\NightTechWipe.exe
 Nothing needs installing on the customer's computer. .NET is included.
 
 ON A CUSTOMER'S COMPUTER

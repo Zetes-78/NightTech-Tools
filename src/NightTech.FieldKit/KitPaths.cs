@@ -20,6 +20,19 @@ public static class KitPaths
         ? Path.Combine(ProgramFolder, "Logs")
         : Path.Combine(Brand.AppDataFolder("Field Kit"), "logs");
 
+    /// <summary>Night Tech Wipe next to the kit on the USB stick, or installed on this computer.</summary>
+    public static string? FindWipe() => FindTool("Wipe", "NightTechWipe.exe", "Night Tech Wipe");
+
+    private static string? FindTool(string kitFolder, string exe, string installedFolder)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(ProgramFolder, "..", kitFolder, exe),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", installedFolder, exe),
+        };
+        return candidates.Select(Path.GetFullPath).FirstOrDefault(File.Exists);
+    }
+
     /// <summary>Night Tech Recovery next to the kit on the USB stick, or installed on this computer.</summary>
     public static string? FindRecovery()
     {

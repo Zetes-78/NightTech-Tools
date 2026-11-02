@@ -6,6 +6,7 @@ In-house software for **Night Tech Solutions** (https://nighttech.solutions), bu
 |---|---|---|
 | `src/NightTech.Core` | Shared library: branding, logging, the imaging engine, case files and reports | v0.1 |
 | `src/NightTech.Recovery` | **Night Tech Recovery**, the shop's data recovery tool. Step 1: read-only drive imager | v0.1 |
+| `src/NightTech.Wipe` | **Night Tech Wipe**: erases a whole drive, checks every sector, writes the record for the Hub's wipe certificate | v0.1 |
 | `src/NightTech.FieldKit` | **Night Tech Field Kit**, a computer health check that runs from a USB stick and leaves a customer report | v0.1 |
 | `tests/NightTech.Core.Tests` | Automated tests for the engine (run on every push) | |
 
@@ -43,6 +44,19 @@ battery report and more) and Night Tech Recovery when it's on the stick.
 
 **Read only.** The checks only look: no settings, files or programs are changed.
 **Reports stay on the stick.** Run from USB, a `portable.txt` file next to the program keeps its reports and logs on the stick instead of the customer's computer.
+
+## Night Tech Wipe: drive erase
+
+Overwrites every sector of a drive once (zeros, or random data), then reads every sector back to check it.
+Bad sectors are retried one at a time and listed. The record (.json for Night Tech Hub, .txt to read) states the
+method, times, problem sectors and plain limits (hidden HPA/DCO areas; SSD spare memory). In the Hub, the
+certificate's "checked" box is ticked only for a complete, fully checked wipe.
+
+**Safety:** the drives holding Windows, this PC's boot partition, the program itself and the reports folder are
+protected and can't be picked. Erasing needs a ticket number, the customer's-agreement box, the drive's serial
+typed in, and a final yes. Right before writing, the drive is re-read to make sure it's still the same one, and
+every volume on it is locked and dismounted (if any is in use, nothing is erased). Night Tech Recovery stays
+read-only: only Wipe has code that writes to a drive.
 
 ## Install
 
