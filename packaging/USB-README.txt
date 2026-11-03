@@ -33,5 +33,12 @@ Open "Cleanup\NightTechCleanup.exe" (it asks for administrator rights). "Run qui
 restore point, before measurements, junk, startup suggestions, Defender update and quick scan, Windows component cleanup
 and drive optimization. Then review the Programs and Security tabs with the customer, and save the report on Finish.
 
+BURN-IN (stress test with a pass/fail sheet)
+Open "Burn-in\NightTechBurnIn.exe" (it asks for administrator rights). Plug laptops in, close other programs, pick a
+length (1 hour for a repair check, overnight for a refurb or a "crashes sometimes" job) and start. It loads every
+processor core and checks every answer, tests the free memory with patterns, writes and checks a test file on the
+chosen drives, watches temperature and speed, and reads drive health, battery wear and Windows' hardware error log.
+Save the sheet: give the customer the .html, upload the .txt to the Hub ticket.
+
 MAC CLEANUP
 On a Mac, open the "Mac Cleanup" folder and double-click "Start Mac Cleanup.command" (see its README.txt).

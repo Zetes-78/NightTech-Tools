@@ -23,6 +23,12 @@ public static class KitPaths
     /// <summary>Night Tech Wipe next to the kit on the USB stick, or installed on this computer.</summary>
     public static string? FindWipe() => FindTool("Wipe", "NightTechWipe.exe", "Night Tech Wipe");
 
+    /// <summary>Night Tech Burn-in next to the kit on the USB stick, or installed on this computer.</summary>
+    public static string? FindBurnIn() => FindTool("Burn-in", "NightTechBurnIn.exe", "Night Tech Burn-in");
+
+    /// <summary>Night Tech Cleanup next to the kit on the USB stick, or installed on this computer.</summary>
+    public static string? FindCleanup() => FindTool("Cleanup", "NightTechCleanup.exe", "Night Tech Cleanup");
+
     private static string? FindTool(string kitFolder, string exe, string installedFolder)
     {
         var candidates = new[]

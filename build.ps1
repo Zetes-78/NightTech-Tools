@@ -38,7 +38,8 @@ $tools = @(
     # Field Kit keeps its native files beside the exe instead of unpacking them to the customer's temp folder.
     @{ Name = "Night Tech Field Kit"; Project = "src\NightTech.FieldKit\NightTech.FieldKit.csproj"; Out = "publish\fieldkit"; Iss = "installer\NightTechFieldKit.iss"; Setup = "NightTechFieldKit-Setup.exe"; SelfExtract = "false" },
     @{ Name = "Night Tech Wipe";      Project = "src\NightTech.Wipe\NightTech.Wipe.csproj";         Out = "publish\wipe";     Iss = "installer\NightTechWipe.iss";     Setup = "NightTechWipe-Setup.exe";     SelfExtract = "false" },
-    @{ Name = "Night Tech Cleanup";   Project = "src\NightTech.Cleanup\NightTech.Cleanup.csproj";   Out = "publish\cleanup";  Iss = "installer\NightTechCleanup.iss";  Setup = "NightTechCleanup-Setup.exe";  SelfExtract = "false" }
+    @{ Name = "Night Tech Cleanup";   Project = "src\NightTech.Cleanup\NightTech.Cleanup.csproj";   Out = "publish\cleanup";  Iss = "installer\NightTechCleanup.iss";  Setup = "NightTechCleanup-Setup.exe";  SelfExtract = "false" },
+    @{ Name = "Night Tech Burn-in";   Project = "src\NightTech.BurnIn\NightTech.BurnIn.csproj";     Out = "publish\burnin";   Iss = "installer\NightTechBurnIn.iss";   Setup = "NightTechBurnIn-Setup.exe";   SelfExtract = "false" }
 )
 
 if (Test-Path publish) { Remove-Item -Recurse -Force publish }
@@ -66,11 +67,12 @@ dotnet publish $tools[0].Project -c Release -r win-x64 --self-contained true `
     -o publish\recovery-usb
 if ($LASTEXITCODE -ne 0) { throw "Publishing the USB copy of Night Tech Recovery failed." }
 $kit = "publish\usb\Night Tech Field Kit"
-New-Item -ItemType Directory -Force "$kit\Field Kit", "$kit\Recovery", "$kit\Wipe", "$kit\Cleanup" | Out-Null
+New-Item -ItemType Directory -Force "$kit\Field Kit", "$kit\Recovery", "$kit\Wipe", "$kit\Cleanup", "$kit\Burn-in" | Out-Null
 Copy-Item -Recurse publish\fieldkit\* "$kit\Field Kit"
 Copy-Item -Recurse publish\recovery-usb\* "$kit\Recovery"
 Copy-Item -Recurse publish\wipe\* "$kit\Wipe"
 Copy-Item -Recurse publish\cleanup\* "$kit\Cleanup"
+Copy-Item -Recurse publish\burnin\* "$kit\Burn-in"
 # The Mac cleanup is built on a Mac by the workflow (mac-build\). When it's here, it goes in the kit and gets its own zip.
 if (Test-Path mac-build) {
     New-Item -ItemType Directory -Force "$kit\Mac Cleanup" | Out-Null
@@ -83,7 +85,7 @@ if (Test-Path mac-build) {
         Write-Hash installer\Output\NightTechMacCleanup.zip
     }
 }
-foreach ($dir in "$kit\Field Kit", "$kit\Recovery", "$kit\Wipe", "$kit\Cleanup") {
+foreach ($dir in "$kit\Field Kit", "$kit\Recovery", "$kit\Wipe", "$kit\Cleanup", "$kit\Burn-in") {
     "This file tells Night Tech tools to keep their logs and reports on this USB stick. Don't delete it." |
         Out-File -Encoding ascii "$dir\portable.txt"
 }

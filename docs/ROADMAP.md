@@ -15,9 +15,9 @@ shop's office software and lives in its own repository.
 - [x] **Recovery step 2: file carver** (JPEG, PNG, GIF, BMP, HEIC/AVIF, MP4/MOV/3GP/M4A, PDF, Word/Excel/PowerPoint, ZIP) working on the image
 - [ ] **Recovery step 3: undelete and partition recovery** (NTFS, FAT32, exFAT; lost partitions)
 - [ ] **Recovery step 4**: thumbnails, sorting, customer report, case tracking tied to the Hub ticket
-- [ ] **Burn-in tester**: CPU, memory, drive health and battery, with a printed pass/fail sheet
+- [x] **Night Tech Burn-in**: self-checking processor load, memory patterns, drive write/read check, temperature and throttling, drive health, battery wear, Windows hardware errors, printed pass/fail sheet
 - [x] **Night Tech Field Kit v1**: USB health check, customer report, Windows tool launchers, Recovery launcher
-- [ ] **Field Kit v2**: launchers for Wipe and Burn-in; send reports straight to the Hub ticket
+- [ ] **Field Kit v2**: launchers for Wipe, Cleanup and Burn-in (done); send reports straight to the Hub ticket
 
 ## Phase 3: business clients and monthly income
 - [ ] **Network documenter**

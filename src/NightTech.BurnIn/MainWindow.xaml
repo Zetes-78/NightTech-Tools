@@ -1,0 +1,147 @@
+<Window x:Class="NightTech.BurnIn.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Night Tech Burn-in"
+        Width="1180" Height="840" MinWidth="980" MinHeight="660"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource Page}"
+        Icon="Assets/logo-icon.png"
+        Closing="Window_Closing">
+  <DockPanel>
+    <Border DockPanel.Dock="Top" Background="{StaticResource Navy}" Padding="20,14">
+      <DockPanel>
+        <Border DockPanel.Dock="Left" Background="White" CornerRadius="8" Padding="4" Margin="0,0,14,0">
+          <Image Source="Assets/logo-icon.png" Width="40" Height="40" />
+        </Border>
+        <TextBlock DockPanel.Dock="Right" x:Name="VersionText" Foreground="#A9BFD9" VerticalAlignment="Center" />
+        <StackPanel VerticalAlignment="Center">
+          <TextBlock Text="Night Tech Burn-in" Foreground="White" FontSize="20" FontWeight="SemiBold" />
+          <TextBlock Text="Stress tests the processor, memory and drives, checks drive health and the battery, and prints a pass/fail sheet."
+                     Foreground="#DBE7F5" FontSize="13" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="16,8">
+      <ListBox x:Name="LogList" Height="90" BorderThickness="0" FontFamily="Consolas" FontSize="12" />
+    </Border>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <Grid Margin="16,14">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="1*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="1.1*" /></Grid.ColumnDefinitions>
+
+        <StackPanel Grid.Column="0">
+          <Border Style="{StaticResource Card}">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="120" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
+              <TextBlock Grid.ColumnSpan="2" Text="Job" Style="{StaticResource SectionTitle}" />
+              <TextBlock Grid.Row="1" Text="Customer" VerticalAlignment="Center" />
+              <TextBox Grid.Row="1" Grid.Column="1" x:Name="CustomerBox" Margin="0,4" />
+              <TextBlock Grid.Row="2" Text="Hub ticket #" VerticalAlignment="Center" />
+              <TextBox Grid.Row="2" Grid.Column="1" x:Name="TicketBox" Margin="0,4" />
+              <TextBlock Grid.Row="3" Text="Technician" VerticalAlignment="Center" />
+              <TextBox Grid.Row="3" Grid.Column="1" x:Name="TechBox" Margin="0,4" />
+              <TextBlock Grid.Row="4" Text="Purpose" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="4" Grid.Column="1" x:Name="PurposeBox" Margin="0,4" SelectedIndex="0">
+                <ComboBoxItem Content="Check after a repair" />
+                <ComboBoxItem Content="Refurbished computer, before sale" />
+                <ComboBoxItem Content="Diagnosis: crashes or freezes" />
+                <ComboBoxItem Content="New build" />
+              </ComboBox>
+            </Grid>
+          </Border>
+
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <TextBlock Text="This computer" Style="{StaticResource SectionTitle}" />
+              <TextBlock x:Name="MachineText" TextWrapping="Wrap" Text="Reading the hardware..." LineHeight="20" />
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <TextBlock Text="Tests" Style="{StaticResource SectionTitle}" />
+              <CheckBox x:Name="CpuCheck" IsChecked="True" Content="Processor: full load on every core, checking every answer" />
+              <CheckBox x:Name="MemCheck" IsChecked="True" Content="Memory: fill free memory with patterns and check them, again and again" />
+              <TextBlock Text="Drives (writes a temporary test file, checks it, deletes it):" Margin="0,8,0,2" />
+              <ItemsControl x:Name="DriveList" Margin="12,0,0,0">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate><CheckBox IsChecked="{Binding Selected}" Content="{Binding Label}" /></DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                <TextBlock Text="Length" VerticalAlignment="Center" Width="60" />
+                <ComboBox x:Name="LengthBox" Width="260" SelectedIndex="1">
+                  <ComboBoxItem Content="Quick: 15 minutes" Tag="15" />
+                  <ComboBoxItem Content="Standard: 1 hour" Tag="60" />
+                  <ComboBoxItem Content="Long: 4 hours" Tag="240" />
+                  <ComboBoxItem Content="Overnight: 8 hours" Tag="480" />
+                </ComboBox>
+              </StackPanel>
+              <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,8,0,10"
+                         Text="Plug laptops in. The computer stays awake during the test and will run hot and loud: that's the point. Close other programs first." />
+              <StackPanel Orientation="Horizontal">
+                <Button x:Name="StartButton" Content="Start burn-in" Style="{StaticResource PrimaryButton}" Click="Start_Click" IsEnabled="False" Margin="0,0,10,0" />
+                <Button x:Name="StopButton" Content="Stop" Style="{StaticResource PlainButton}" Click="Stop_Click" IsEnabled="False" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <StackPanel Grid.Column="2">
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Right" x:Name="ClockText" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Navy}" />
+                <TextBlock Text="Live" Style="{StaticResource SectionTitle}" />
+              </DockPanel>
+              <TextBlock x:Name="StatusText" FontSize="16" FontWeight="SemiBold" Text="Ready" Margin="0,0,0,6" TextWrapping="Wrap" />
+              <ProgressBar x:Name="Progress" Height="10" Foreground="{StaticResource Orange}" Margin="0,0,0,12" Maximum="1" />
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
+                <TextBlock Text="Processor" FontWeight="SemiBold" Margin="0,3" />
+                <TextBlock Grid.Column="1" x:Name="CpuText" Text="-" TextWrapping="Wrap" Margin="0,3" />
+                <TextBlock Grid.Row="1" Text="Temperature" FontWeight="SemiBold" Margin="0,3" />
+                <TextBlock Grid.Row="1" Grid.Column="1" x:Name="TempText" Text="-" TextWrapping="Wrap" Margin="0,3" />
+                <TextBlock Grid.Row="2" Text="Speed" FontWeight="SemiBold" Margin="0,3" />
+                <TextBlock Grid.Row="2" Grid.Column="1" x:Name="PerfText" Text="-" TextWrapping="Wrap" Margin="0,3" />
+                <TextBlock Grid.Row="3" Text="Memory" FontWeight="SemiBold" Margin="0,3" />
+                <TextBlock Grid.Row="3" Grid.Column="1" x:Name="MemText" Text="-" TextWrapping="Wrap" Margin="0,3" />
+                <TextBlock Grid.Row="4" Text="Drives" FontWeight="SemiBold" Margin="0,3" />
+                <TextBlock Grid.Row="4" Grid.Column="1" x:Name="DriveText" Text="-" TextWrapping="Wrap" Margin="0,3" />
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}" x:Name="ResultCard" Visibility="Collapsed">
+            <StackPanel>
+              <TextBlock Text="Result" Style="{StaticResource SectionTitle}" />
+              <Border x:Name="VerdictBox" CornerRadius="8" Padding="14,10" Margin="0,0,0,10">
+                <TextBlock x:Name="VerdictText" FontSize="24" FontWeight="Bold" />
+              </Border>
+              <ItemsControl x:Name="CheckList">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <DockPanel Margin="0,3">
+                      <TextBlock DockPanel.Dock="Left" Text="{Binding Mark}" Foreground="{Binding Color}" FontWeight="Bold" Width="48" />
+                      <TextBlock TextWrapping="Wrap"><Run Text="{Binding Head, Mode=OneWay}" FontWeight="SemiBold" /><LineBreak /><Run Text="{Binding Detail, Mode=OneWay}" Foreground="#4A5568" /></TextBlock>
+                    </DockPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBlock Text="Notes for the sheet (optional)" Margin="0,10,0,4" />
+              <TextBox x:Name="NotesBox" Height="60" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" />
+              <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                <Button Content="Save and open the sheet" Style="{StaticResource PrimaryButton}" Click="Save_Click" Margin="0,0,10,0" />
+                <Button Content="Open the reports folder" Style="{StaticResource PlainButton}" Click="OpenReports_Click" />
+              </StackPanel>
+              <TextBlock x:Name="SavedText" Foreground="{StaticResource Muted}" Margin="0,8,0,0" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Grid>
+    </ScrollViewer>
+  </DockPanel>
+</Window>

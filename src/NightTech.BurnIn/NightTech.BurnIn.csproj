@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RootNamespace>NightTech.BurnIn</RootNamespace>
+    <AssemblyName>NightTechBurnIn</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\NightTechBurnIn.ico</ApplicationIcon>
+    <Version>0.1.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Company>Night Tech Solutions</Company>
+    <Product>Night Tech Burn-in</Product>
+    <Copyright>Copyright (c) Night Tech Solutions</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NightTech.Core\NightTech.Core.csproj" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
+    <PackageReference Include="System.Diagnostics.EventLog" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The Field Kit's read-only hardware checks (computer, memory, drive health, battery). -->
+    <Compile Include="..\NightTech.FieldKit\Collector.cs" Link="Shared\Collector.cs" />
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\logo-icon.png" />
+  </ItemGroup>
+
+</Project>

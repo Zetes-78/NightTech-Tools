@@ -49,6 +49,15 @@ public static class Collector
         progress.Report("Checks finished.");
     }
 
+    /// <summary>Just the hardware: computer, memory, drives and battery (used by Night Tech Burn-in).</summary>
+    public static void CollectHardware(DiagnosticReport r, IProgress<string> progress)
+    {
+        Step(r, progress, "the computer and Windows", () => Computer(r));
+        Step(r, progress, "memory", () => Memory(r));
+        Step(r, progress, "drives", () => Disks(r));
+        Step(r, progress, "the battery", () => Battery(r));
+    }
+
     private static readonly TimeSpan StepTimeLimit = TimeSpan.FromSeconds(90);
 
     private static void Step(DiagnosticReport r, IProgress<string> progress, string label, Action check)

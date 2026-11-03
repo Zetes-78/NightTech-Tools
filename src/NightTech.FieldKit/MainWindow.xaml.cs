@@ -173,6 +173,12 @@ public partial class MainWindow : Window
         var wipe = KitPaths.FindWipe();
         if (wipe is not null)
             Add("Night Tech Wipe", "Erase a drive and make the wipe record (admin)", () => Launch(wipe));
+        var burnIn = KitPaths.FindBurnIn();
+        if (burnIn is not null)
+            Add("Night Tech Burn-in", "Stress test with a pass/fail sheet (admin)", () => Launch(burnIn));
+        var cleanup = KitPaths.FindCleanup();
+        if (cleanup is not null)
+            Add("Night Tech Cleanup", "The $50 PC cleanup with a report (admin)", () => Launch(cleanup));
 
         Add("Battery report", "Windows' full battery history, saved with the reports", () => _ = BatteryReportAsync());
         Add("Device Manager", "Missing drivers and failed devices", () => Launch("devmgmt.msc"));
