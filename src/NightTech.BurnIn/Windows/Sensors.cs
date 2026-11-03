@@ -44,9 +44,13 @@ public static class Sensors
         return null;
     }
 
-    /// <summary>Hardware errors (WHEA: processor, memory, PCIe) Windows logged since a time. Null if the log couldn't be read.</summary>
+    /// <summary>Uncorrected hardware errors (WHEA critical/error: processor, memory, PCIe) since a time. Null if the log couldn't be read.</summary>
     public static int? HardwareErrorsSince(DateTime since) =>
-        Count($"*[System[Provider[@Name='Microsoft-Windows-WHEA-Logger'] and (Level=1 or Level=2 or Level=3) and TimeCreated[@SystemTime>='{since.ToUniversalTime():o}']]]");
+        Count($"*[System[Provider[@Name='Microsoft-Windows-WHEA-Logger'] and (Level=1 or Level=2) and TimeCreated[@SystemTime>='{since.ToUniversalTime():o}']]]");
+
+    /// <summary>Errors the hardware corrected itself (WHEA warnings) since a time.</summary>
+    public static int? CorrectedErrorsSince(DateTime since) =>
+        Count($"*[System[Provider[@Name='Microsoft-Windows-WHEA-Logger'] and Level=3 and TimeCreated[@SystemTime>='{since.ToUniversalTime():o}']]]");
 
     /// <summary>"The system rebooted without cleanly shutting down first" (Kernel-Power 41) since a time.</summary>
     public static int? UnexpectedShutdownsSince(DateTime since) =>
@@ -78,10 +82,27 @@ public static class Sensors
     }
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalMemoryStatusEx(ref MemoryStatus s);
 
+    /// <summary>Installed memory, and how much can be used now without squeezing Windows: the smaller of free memory and remaining commit (page file included).</summary>
     public static (long Total, long Available) Memory()
     {
         var s = new MemoryStatus { Length = (uint)Marshal.SizeOf<MemoryStatus>() };
-        return GlobalMemoryStatusEx(ref s) ? ((long)s.TotalPhys, (long)s.AvailPhys) : (0, 0);
+        return GlobalMemoryStatusEx(ref s) ? ((long)s.TotalPhys, (long)Math.Min(s.AvailPhys, s.AvailPage)) : (0, 0);
+    }
+
+    [StructLayout(LayoutKind.Sequential)] private struct PowerThrottling { public uint Version, ControlMask, StateMask; }
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetProcessInformation(IntPtr process, int infoClass, ref PowerThrottling info, uint size);
+    [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentProcess();
+
+    /// <summary>Asks Windows not to move the test onto power-saving cores or slow it down when the window isn't in front.</summary>
+    public static void FullSpeed()
+    {
+        try
+        {
+            var p = new PowerThrottling { Version = 1, ControlMask = 1 /* execution speed */, StateMask = 0 /* off */ };
+            SetProcessInformation(GetCurrentProcess(), 4 /* ProcessPowerThrottling */, ref p, (uint)Marshal.SizeOf<PowerThrottling>());
+        }
+        catch (EntryPointNotFoundException) { }
     }
 
     [StructLayout(LayoutKind.Sequential)] private struct PowerStatus { public byte AcLine, Battery, Percent, Reserved; public int LifeTime, FullLifeTime; }

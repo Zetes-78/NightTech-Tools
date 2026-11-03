@@ -28,8 +28,9 @@ public sealed class CpuResult
     public long Iterations { get; set; }
     public long Errors { get; set; }
     public string FirstError { get; set; } = "";
-    /// <summary>Hottest processor temperature seen, when Windows reports one.</summary>
+    /// <summary>Hottest reading of the board's thermal sensor near the processor, when Windows reports one that moves.</summary>
     public double? MaxTempC { get; set; }
+    public double? MinTempC { get; set; }
     /// <summary>Processor speed as a percent of its rated speed: early in the test, and over the last part.</summary>
     public double? PerfStartPercent { get; set; }
     public double? PerfEndPercent { get; set; }
@@ -67,28 +68,48 @@ public sealed class BurnInReport
     public CpuResult? Cpu { get; set; }
     public MemoryResult? Memory { get; set; }
     public List<DriveResult> Drives { get; set; } = new();
-    /// <summary>Hardware errors Windows logged during the test (WHEA: processor, memory or bus errors).</summary>
+    /// <summary>Uncorrected hardware errors Windows logged during the test (WHEA errors: processor, memory or bus).</summary>
     public int HardwareErrorsDuring { get; set; }
+    /// <summary>Errors the hardware caught and corrected itself during the test (WHEA warnings). Common and often harmless.</summary>
+    public int CorrectedErrorsDuring { get; set; }
+    public bool CpuSelected { get; set; }
+    public bool MemorySelected { get; set; }
+    public int DrivesSelected { get; set; }
     /// <summary>Unexpected shutdowns in the 30 days before the test.</summary>
     public int UnexpectedShutdowns30d { get; set; }
     public bool EventLogChecked { get; set; }
     public List<BurnInCheck> Checks { get; set; } = new();
     public string Notes { get; set; } = "";
 
+    private static readonly string[] StressAreas = { "Processor", "Memory", "Drive" };
+
+    /// <summary>
+    /// FAIL if anything failed. NOT RUN if none of the stress tests did any work (health checks alone don't make a pass).
+    /// Otherwise PASS WITH NOTES if anything needs a note, including a test that was chosen but didn't run, or a run cut short.
+    /// </summary>
     public Verdict Overall =>
         Checks.Any(c => c.Result == Verdict.Fail) ? Verdict.Fail
-        : Checks.Count == 0 || Checks.All(c => c.Result == Verdict.NotRun) ? Verdict.NotRun
-        : Checks.Any(c => c.Result == Verdict.Warning) ? Verdict.Warning
+        : !Checks.Any(c => StressAreas.Contains(c.Area) && c.Result != Verdict.NotRun) ? Verdict.NotRun
+        : Checks.Any(c => c.Result is Verdict.Warning or Verdict.NotRun) ? Verdict.Warning
         : Verdict.Pass;
 
     public const double HotC = 90, TooHotC = 100;
+    /// <summary>Below this share of its rated speed at the end of the test, the processor is throttling.</summary>
+    public const double ThrottledPercent = 85;
 
     /// <summary>Turns the measurements into pass/warning/fail lines. Call once the tests are done.</summary>
     public void Grade()
     {
         Checks.Clear();
+        var ranFor = Finished > Started ? Finished - Started : TimeSpan.Zero;
+        if ((CpuSelected || MemorySelected) && Planned > TimeSpan.Zero && (Stopped || ranFor.TotalSeconds < Planned.TotalSeconds * 0.9))
+            Checks.Add(new("Length", Verdict.Warning, $"Ran {Dur(ranFor)} of the {Dur(Planned)} planned",
+                "Stopped early, so problems that only show after a long time under load may not have appeared. Run it again for the full time to be sure."));
         var c = Cpu;
-        if (c is null) Checks.Add(new("Processor", Verdict.NotRun, "Processor stress test not run"));
+        if (c is null)
+        {
+            if (CpuSelected) Checks.Add(new("Processor", Verdict.NotRun, "Processor stress test didn't run"));
+        }
         else
         {
             var ran = $"{c.Threads} threads for {Dur(c.Ran)}, {c.Iterations:N0} self-checked calculations";
@@ -100,24 +121,28 @@ public sealed class BurnInReport
             else
                 Checks.Add(new("Processor", Verdict.Pass, "Processor stable under full load", ran + ", every one correct."));
 
-            if (c.MaxTempC is { } t)
+            // A thermal sensor that barely moves under full load isn't really reporting (many boards return a fixed value).
+            bool tempReal = c.MaxTempC is { } mx && c.MinTempC is { } mn && mx - mn >= 2;
+            if (tempReal && c.MaxTempC is { } t)
             {
-                if (t >= TooHotC) Checks.Add(new("Cooling", Verdict.Fail, $"Processor reached {t:0} °C", "Too hot: clean the fans and heatsink, and replace the thermal paste."));
-                else if (t >= HotC) Checks.Add(new("Cooling", Verdict.Warning, $"Processor reached {t:0} °C", "Running hot: check the fans and clean out dust."));
-                else Checks.Add(new("Cooling", Verdict.Pass, $"Processor peaked at {t:0} °C", "Temperatures stayed in a safe range."));
+                if (t >= TooHotC) Checks.Add(new("Cooling", Verdict.Fail, $"Thermal sensor reached {t:0} °C", "Too hot: clean the fans and heatsink, and replace the thermal paste."));
+                else if (t >= HotC) Checks.Add(new("Cooling", Verdict.Warning, $"Thermal sensor reached {t:0} °C", "Running hot: check the fans and clean out dust."));
+                else Checks.Add(new("Cooling", Verdict.Pass, $"Thermal sensor peaked at {t:0} °C", "The board's sensor near the processor stayed in a safe range."));
             }
-            if (c.PerfStartPercent is > 0 and var s && c.PerfEndPercent is { } e)
+            if (c.PerfEndPercent is { } e)
             {
-                if (e < s * 0.7)
+                var from = c.PerfStartPercent is > 0 and var s ? $"from {s:0}% " : "";
+                if (e < ThrottledPercent)
                     Checks.Add(new("Cooling", Verdict.Warning, "Processor slowed down under load",
-                        $"Speed dropped from {s:0}% to {e:0}% of its rated speed during the test. Usually heat; on a laptop, also check it's plugged in."));
-                else if (c.MaxTempC is null)
-                    Checks.Add(new("Cooling", Verdict.Pass, "Processor kept its speed under load", $"{e:0}% of rated speed at the end (temperature isn't reported on this computer)."));
+                        $"Speed went {from}to {e:0}% of its rated speed by the end. Usually heat; on a laptop, also check it's plugged in and on a balanced power plan."));
+                else
+                    Checks.Add(new("Cooling", Verdict.Pass, "Processor kept its rated speed under load",
+                        $"{e:0}% of rated speed at the end{(tempReal ? "" : " (this computer doesn't report a usable temperature)")}."));
             }
         }
 
         var m = Memory;
-        if (m is null) Checks.Add(new("Memory", Verdict.NotRun, "Memory test not run"));
+        if (m is null) { if (MemorySelected) Checks.Add(new("Memory", Verdict.NotRun, "Memory test didn't run")); }
         else if (m.Errors > 0)
             Checks.Add(new("Memory", Verdict.Fail, $"Memory test found {m.Errors:N0} error(s)",
                 $"Replace the faulty memory. First: {m.ErrorSamples.FirstOrDefault()}"));
@@ -130,7 +155,7 @@ public sealed class BurnInReport
                 $"{Format.Bytes(m.BytesTested)} tested{share} with 5 patterns. {m.Note}".Trim()));
         }
 
-        if (Drives.Count == 0) Checks.Add(new("Drive", Verdict.NotRun, "Drive test not run"));
+        if (Drives.Count < DrivesSelected) Checks.Add(new("Drive", Verdict.NotRun, $"{DrivesSelected - Drives.Count} chosen drive test(s) didn't run"));
         foreach (var d in Drives)
         {
             if (d.BytesTested == 0) { Checks.Add(new("Drive", Verdict.NotRun, $"Drive test on {Root(d.Folder)} not run", d.Note)); continue; }
@@ -166,7 +191,10 @@ public sealed class BurnInReport
         if (EventLogChecked)
         {
             if (HardwareErrorsDuring > 0)
-                Checks.Add(new("Stability", Verdict.Fail, $"Windows logged {HardwareErrorsDuring} hardware error(s) during the test", "Processor, memory or bus errors (WHEA). Check cooling, memory and power."));
+                Checks.Add(new("Stability", Verdict.Fail, $"Windows logged {HardwareErrorsDuring} uncorrected hardware error(s) during the test", "Processor, memory or bus errors (WHEA). Check cooling, memory and power."));
+            else if (CorrectedErrorsDuring > 0)
+                Checks.Add(new("Stability", Verdict.Warning, $"{CorrectedErrorsDuring} corrected hardware error(s) during the test",
+                    "The hardware caught and fixed these itself (WHEA warnings). Often harmless (PCIe power saving), but repeated processor or memory ones are an early warning."));
             else
                 Checks.Add(new("Stability", Verdict.Pass, "No hardware errors logged during the test"));
             if (UnexpectedShutdowns30d >= HealthRules.UnexpectedShutdownsWarn)

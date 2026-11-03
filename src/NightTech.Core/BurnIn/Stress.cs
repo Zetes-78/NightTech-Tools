@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Microsoft.Win32.SafeHandles;
@@ -62,6 +63,22 @@ public sealed class CpuStress
         // Decimal work: square roots, multiplies and divides (all exactly reproducible on the same processor).
         double r = 0;
         for (int i = 1; i < 20000; i++) r += Math.Sqrt(i) * 1.000001 / (i + 0.5);
+
+        // Wide (AVX) multiply-adds: the heaviest load for power and cooling. Separate multiply and add, so every run
+        // rounds exactly the same way.
+        int lanes = Vector<double>.Count;
+        Span<double> va = stackalloc double[lanes * 16], vb = stackalloc double[lanes * 16];
+        for (int i = 0; i < va.Length; i++) { va[i] = 1.0 + i * 1e-3; vb[i] = 0.999999 - i * 1e-7; }
+        var sum = Vector<double>.Zero;
+        var scale = new Vector<double>(0.9999995);
+        for (int rep = 0; rep < 3000; rep++)
+            for (int i = 0; i < va.Length; i += lanes)
+            {
+                var x = new Vector<double>(va.Slice(i, lanes));
+                var y = new Vector<double>(vb.Slice(i, lanes));
+                sum = sum * scale + x * y;
+            }
+        for (int i = 0; i < lanes; i++) r += sum[i];
         return new Work(hash, acc, r);
     }
 
@@ -85,7 +102,7 @@ public sealed class CpuStress
                     }
                     Interlocked.Increment(ref _iterations);
                 }
-            }) { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "burn-in cpu " + t };
+            }) { IsBackground = true, Priority = ThreadPriority.Normal, Name = "burn-in cpu " + t };
             workers[t].Start();
         }
         foreach (var w in workers) w.Join();
@@ -226,14 +243,16 @@ public sealed class DriveResult
 }
 
 /// <summary>
-/// Drive test: writes a temporary file of known data, reads it back and checks every byte, then deletes it. On Windows
-/// it bypasses Windows' memory cache so the speeds and the check are of the drive itself. Only ever touches its own
-/// temporary file, and always leaves plenty of free space.
+/// Drive test: writes a temporary file of known data, reads it back and checks every byte. On Windows it bypasses
+/// Windows' memory cache so the speeds and the check are of the drive itself. The file lives in a new folder with a
+/// random name (never one that already exists, and never through a link or junction), is opened "create new" so it
+/// can't land on anything else, and is deleted when its handle closes, even if the program crashes. Leftovers from a
+/// blue screen or power cut are removed the next time the tool starts (<see cref="RemoveLeftovers"/>).
 /// </summary>
 public static class DriveTest
 {
     public const int Chunk = 8 * 1024 * 1024;
-    public const string FileName = "NightTech-BurnIn-test.tmp";
+    public const string Prefix = "NightTech-BurnIn-";
 
     /// <summary>Test size: 2 GB by default, never more than a tenth of the free space, and never leaving less than 5 GB free.</summary>
     public static long SafeBytes(long freeBytes, long wanted = 2L * 1024 * 1024 * 1024)
@@ -242,16 +261,39 @@ public static class DriveTest
         return bytes < Chunk ? 0 : bytes / Chunk * Chunk;
     }
 
-    public static unsafe DriveResult Run(string folder, long bytes, CancellationToken ct, IProgress<double>? progress = null)
+    /// <summary>Removes test folders a crash or power cut left behind in <paramref name="baseFolder"/>. Only our own files, never through links.</summary>
+    public static int RemoveLeftovers(string baseFolder)
     {
-        var r = new DriveResult { Folder = folder };
+        int n = 0;
+        try
+        {
+            if (!Directory.Exists(baseFolder) || Cleanup.Junk.HasLinkOnPath(baseFolder)) return 0;
+            foreach (var dir in Directory.GetDirectories(baseFolder, Prefix + "*"))
+            {
+                if (Cleanup.Junk.IsLink(dir)) continue;
+                foreach (var f in Directory.GetFiles(dir, Prefix + "*.tmp"))
+                    if (!Cleanup.Junk.IsLink(f)) { File.Delete(f); n++; }
+                if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return n;
+    }
+
+    public static unsafe DriveResult Run(string baseFolder, long bytes, CancellationToken ct, IProgress<double>? progress = null)
+    {
+        var r = new DriveResult { Folder = baseFolder };
         bytes = bytes / Chunk * Chunk;
         if (bytes <= 0) { r.Note = "Not enough free space to test this drive safely."; return r; }
+        Directory.CreateDirectory(baseFolder);
+        if (Cleanup.Junk.HasLinkOnPath(baseFolder)) { r.Note = "The test folder is behind a link or junction, so it wasn't used."; return r; }
+        var folder = Path.Combine(baseFolder, Prefix + Guid.NewGuid().ToString("N"));
+        if (Directory.Exists(folder)) { r.Note = "Unexpected folder already there; not tested."; return r; }
         Directory.CreateDirectory(folder);
-        var path = Path.Combine(folder, FileName);
+        var path = Path.Combine(folder, Prefix + "test.tmp");
         bool direct = OperatingSystem.IsWindows();
         const FileOptions NoBuffering = (FileOptions)0x20000000; // FILE_FLAG_NO_BUFFERING
-        var opts = FileOptions.WriteThrough | FileOptions.SequentialScan | (direct ? NoBuffering : 0);
+        var opts = FileOptions.WriteThrough | FileOptions.DeleteOnClose | (direct ? NoBuffering : 0);
         void* mem = NativeMemory.AlignedAlloc(Chunk, 4096);
         void* expect = NativeMemory.AlignedAlloc(Chunk, 4096);
         try
@@ -259,47 +301,51 @@ public static class DriveTest
             var buf = new Span<byte>(mem, Chunk);
             var want = new Span<byte>(expect, Chunk);
             long chunks = bytes / Chunk;
-            var sw = Stopwatch.StartNew();
-            using (var h = File.OpenHandle(path, FileMode.Create, FileAccess.Write, FileShare.None, opts, bytes))
+            // One handle for writing and reading back: CreateNew never opens an existing file or link, and
+            // DeleteOnClose removes it however the program ends.
+            using var h = File.OpenHandle(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, opts, bytes);
+            var attrs = File.GetAttributes(path);
+            if ((attrs & (FileAttributes.Compressed | FileAttributes.Encrypted)) != 0)
             {
-                for (long c = 0; c < chunks; c++)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    Pattern(c, buf);
-                    RandomAccess.Write(h, buf, c * Chunk);
-                    progress?.Report((c + 1) / (double)chunks / 2);
-                }
-                if (!direct) RandomAccess.FlushToDisk(h);
+                direct = false;
+                r.Note = "The drive or folder is compressed or encrypted, so Windows may have served the read-back from memory.";
             }
+            var sw = Stopwatch.StartNew();
+            for (long c = 0; c < chunks; c++)
+            {
+                ct.ThrowIfCancellationRequested();
+                Pattern(c, buf);
+                RandomAccess.Write(h, buf, c * Chunk);
+                progress?.Report((c + 1) / (double)chunks / 2);
+            }
+            RandomAccess.FlushToDisk(h);
             r.WriteMBps = bytes / 1048576.0 / Math.Max(0.001, sw.Elapsed.TotalSeconds);
-            r.BytesTested = bytes;
 
             sw.Restart();
-            using (var h = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.None, opts))
+            for (long c = 0; c < chunks; c++)
             {
-                for (long c = 0; c < chunks; c++)
+                ct.ThrowIfCancellationRequested();
+                int n = RandomAccess.Read(h, buf, c * Chunk);
+                Pattern(c, want);
+                if (n != Chunk || !buf.SequenceEqual(want))
                 {
-                    ct.ThrowIfCancellationRequested();
-                    int n = RandomAccess.Read(h, buf, c * Chunk);
-                    Pattern(c, want);
-                    if (n != Chunk || !buf.SequenceEqual(want))
-                    {
-                        long bad = 0;
-                        for (int i = 0; i < Chunk; i++) if (i >= n || buf[i] != want[i]) bad++;
-                        r.Errors += bad;
-                    }
-                    progress?.Report(0.5 + (c + 1) / (double)chunks / 2);
+                    long bad = 0;
+                    for (int i = 0; i < Chunk; i++) if (i >= n || buf[i] != want[i]) bad++;
+                    r.Errors += bad;
                 }
+                progress?.Report(0.5 + (c + 1) / (double)chunks / 2);
             }
             r.ReadMBps = bytes / 1048576.0 / Math.Max(0.001, sw.Elapsed.TotalSeconds);
+            r.BytesTested = bytes;
             r.Uncached = direct;
-            if (!direct) r.Note = "Read speed may include the system's memory cache.";
+            if (!OperatingSystem.IsWindows()) r.Note = "Read speed may include the system's memory cache.";
         }
         finally
         {
             NativeMemory.AlignedFree(mem);
             NativeMemory.AlignedFree(expect);
-            try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            try { if (File.Exists(path) && !Cleanup.Junk.IsLink(path)) File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            try { if (!Directory.EnumerateFileSystemEntries(folder).Any()) Directory.Delete(folder); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
         return r;
     }

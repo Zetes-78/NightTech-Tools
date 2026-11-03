@@ -57,8 +57,19 @@ public partial class MainWindow : Window
         Loaded += async (_, _) => await ReadMachine();
     }
 
+    private static string BaseFolder(string root) =>
+        root.Equals(Path.GetPathRoot(Environment.SystemDirectory), StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp")   // Windows' own temp folder: other users can't look inside it, and each test uses a new random-named folder
+            : root;
+
     private async Task ReadMachine()
     {
+        // Test files a blue screen or power cut left behind last time.
+        await Task.Run(() =>
+        {
+            foreach (var d in DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady))
+                if (DriveTest.RemoveLeftovers(BaseFolder(d.Name)) is > 0 and var n) App.Log.Info($"Removed {n} leftover test file(s) from {d.Name}.");
+        });
         var r = new DiagnosticReport { RanAsAdministrator = Collector.IsAdministrator };
         await Task.Run(() => Collector.CollectHardware(r, new Progress<string>(s => App.Log.Info(s))));
         _machine = ToMachine(r);
@@ -122,7 +133,9 @@ public partial class MainWindow : Window
         {
             ToolVersion = App.ToolVersion, Customer = CustomerBox.Text.Trim(), Ticket = TicketBox.Text.Trim(), Technician = TechBox.Text.Trim(),
             Purpose = (string)((ComboBoxItem)PurposeBox.SelectedItem).Content, Started = DateTime.Now, Planned = planned, Machine = _machine,
+            CpuSelected = doCpu, MemorySelected = doMem, DrivesSelected = drives.Count,
         };
+        Sensors.FullSpeed();
         _stop = new CancellationTokenSource();
         var timeUp = new CancellationTokenSource(planned);
         var both = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token, timeUp.Token);
@@ -167,9 +180,7 @@ public partial class MainWindow : Window
                 foreach (var d in drives)
                 {
                     if (both.IsCancellationRequested) break;
-                    var folder = d.Root.Equals(Path.GetPathRoot(Environment.SystemDirectory), StringComparison.OrdinalIgnoreCase)
-                        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Night Tech", "Burn-in test")
-                        : Path.Combine(d.Root, "NightTech-BurnIn");
+                    var folder = BaseFolder(d.Root);
                     var free = new DriveInfo(d.Root).AvailableFreeSpace;
                     _driveStatus = $"{d.Root.TrimEnd('\\')}: writing and checking...";
                     DriveResult res;
@@ -183,7 +194,6 @@ public partial class MainWindow : Window
                         res = new DriveResult { Folder = folder, Note = "Couldn't test: " + ex.Message };
                         App.Log.Warn($"Drive test on {d.Root}: {ex.Message}");
                     }
-                    finally { try { if (Directory.Exists(folder) && !Directory.EnumerateFileSystemEntries(folder).Any()) Directory.Delete(folder); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
                     lock (_report.Drives) _report.Drives.Add(res);
                     App.Log.Info($"Drive {d.Root}: wrote {res.WriteMBps:0} MB/s, read {res.ReadMBps:0} MB/s, {res.Errors} errors. {res.Note}");
                 }
@@ -202,10 +212,14 @@ public partial class MainWindow : Window
             _timer.Stop();
             Tick();
             Sensors.KeepAwake(false);
-            await Finish(_stop.IsCancellationRequested);
-            timeUp.Dispose(); both.Dispose(); _stop.Dispose(); _stop = null;
-            SetRunning(false);
-            if (_closeAfter) { _closeAfter = false; _ = Dispatcher.InvokeAsync(Close); }
+            try { await Finish(_stop.IsCancellationRequested); }
+            catch (Exception ex) { App.Log.Error("Couldn't finish the sheet.", ex); Warn("Couldn't finish the sheet: " + ex.Message); }
+            finally
+            {
+                timeUp.Dispose(); both.Dispose(); _stop.Dispose(); _stop = null;
+                SetRunning(false);
+                if (_closeAfter) { _closeAfter = false; _ = Dispatcher.InvokeAsync(Close); }
+            }
         }
     }
 
@@ -218,6 +232,7 @@ public partial class MainWindow : Window
         if (r.Cpu is { } c && _samples.Count > 0)
         {
             c.MaxTempC = _samples.Where(s => s.Temp is not null).Select(s => s.Temp).DefaultIfEmpty(null).Max();
+            c.MinTempC = _samples.Where(s => s.Temp is not null).Select(s => s.Temp).DefaultIfEmpty(null).Min();
             var perf = _samples.Where(s => s.Perf is not null).ToList();
             if (perf.Count >= 6)
             {
@@ -231,16 +246,23 @@ public partial class MainWindow : Window
             }
         }
         var whea = await Task.Run(() => Sensors.HardwareErrorsSince(r.Started));
+        r.CorrectedErrorsDuring = await Task.Run(() => Sensors.CorrectedErrorsSince(r.Started)) ?? 0;
         var shut = await Task.Run(() => Sensors.UnexpectedShutdownsSince(r.Started.AddDays(-30)));
         r.EventLogChecked = whea is not null;
         r.HardwareErrorsDuring = whea ?? 0;
         r.UnexpectedShutdowns30d = shut ?? 0;
 
         // Read drive health again: a drive that struggled under the test may now report a problem.
-        var after = new DiagnosticReport();
+        var after = new DiagnosticReport { RanAsAdministrator = Collector.IsAdministrator };
         await Task.Run(() => Collector.CollectHardware(after, new Progress<string>(_ => { })));
-        if (after.Disks.Count > 0) r.Machine.Disks = after.Disks;
-        if (after.Battery is not null) r.Machine.Battery = after.Battery;
+        // Keep the fuller reading for each drive: the later one wins only where it actually has the health details.
+        foreach (var d in after.Disks)
+        {
+            var i = r.Machine.Disks.FindIndex(x => x.Serial.Length > 0 ? x.Serial == d.Serial : x.Name == d.Name);
+            bool richer = d.WearPercent is not null || d.ReadErrorsUncorrected is not null || d.Health != "Unknown";
+            if (i >= 0 && richer) r.Machine.Disks[i] = d;
+            else if (i < 0) r.Machine.Disks.Add(d);
+        }
 
         r.Grade();
         var o = r.Overall;
